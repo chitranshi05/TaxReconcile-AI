@@ -1,0 +1,25 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables
+.env
+
+# Uploaded files
+uploads/
+
+# Generated reports
+reports/
+
+# ML models
+models/
+
+# IDE
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
