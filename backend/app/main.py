@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.documents import router as documents_router
 from app.database.mongodb import client
 
 
@@ -8,6 +9,9 @@ app = FastAPI(
     description="AI-powered tax reconciliation and anomaly detection platform",
     version="1.0.0"
 )
+
+
+app.include_router(documents_router)
 
 
 @app.get("/")
