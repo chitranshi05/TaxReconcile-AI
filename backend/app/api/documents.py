@@ -1,10 +1,11 @@
 from pathlib import Path
 
+from bson import ObjectId
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.database.mongodb import get_database
 from app.models.document import create_document
-
+from app.services.ingestion.inspector import inspect_file
 
 router = APIRouter(
     prefix="/api/documents",
@@ -70,3 +71,47 @@ async def upload_document(
         "file_type": file_type,
         "status": document["status"]
     }
+
+@router.get("/{document_id}/inspect")
+def inspect_document(document_id: str):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID."
+        )
+
+    document = database.documents.find_one(
+        {"_id": ObjectId(document_id)}
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found."
+        )
+
+    file_path = UPLOAD_DIR / document["filename"]
+
+    try:
+        result = inspect_file(str(file_path))
+
+        return {
+            "document_id": document_id,
+            "filename": document["filename"],
+            "file_type": document["file_type"],
+            "sheets": result
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to inspect document: {str(error)}"
+        )
