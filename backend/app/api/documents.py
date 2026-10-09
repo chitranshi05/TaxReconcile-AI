@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from app.database.mongodb import get_database
 from app.models.document import create_document
 from app.services.ingestion.inspector import inspect_file
+from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.column_mapper import detect_columns
 
 router = APIRouter(
@@ -101,6 +102,31 @@ def inspect_document(document_id: str):
             sheet["column_mapping"] = detect_columns(
                 sheet["columns"]
             )
+            dataframe = pd.DataFrame(sheet["sample"])
+            sheet["validation_note"] = (
+        "Validation uses the sample rows only. "
+        "Full-file validation will be added in the processing pipeline."
+            )
+            if not dataframe.empty:
+                sheet["validation"] = validate_transactions(
+                    dataframe,
+                    sheet["column_mapping"]
+                )
+            else:
+                sheet["validation"] = {
+                    "valid": False,
+                    "total_rows": 0,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                    "errors": [
+                        {
+                            "row": None,
+                            "field": None,
+                            "message": "No sample rows available."
+                }
+            ],
+            "warnings": []
+        }
 
         return {
             "document_id": document_id,
