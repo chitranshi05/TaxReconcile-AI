@@ -1,7 +1,7 @@
 
 from fastapi import Depends, HTTPException, status
 
-from app.api.auth import get_current_user
+from app.services.auth_dependencies import get_current_user
 
 
 ROLE_PERMISSIONS = {
@@ -24,14 +24,11 @@ ROLE_PERMISSIONS = {
 
 def require_role(*allowed_roles: str):
     def role_checker(user=Depends(get_current_user)):
-        role = user.get("role", "USER")
-
-        if role not in allowed_roles:
+        if user.get("role", "USER") not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to perform this action",
             )
-
         return user
 
     return role_checker
@@ -40,14 +37,11 @@ def require_role(*allowed_roles: str):
 def require_permission(permission: str):
     def permission_checker(user=Depends(get_current_user)):
         role = user.get("role", "USER")
-        permissions = ROLE_PERMISSIONS.get(role, set())
-
-        if permission not in permissions:
+        if permission not in ROLE_PERMISSIONS.get(role, set()):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to perform this action",
             )
-
         return user
 
     return permission_checker

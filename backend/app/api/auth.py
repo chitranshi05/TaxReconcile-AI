@@ -1,24 +1,26 @@
 
-from app.services.permissions import require_role
-
-
-from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from pymongo.errors import DuplicateKeyError
 
 from app.database.mongodb import get_database
 from app.models.user import create_user
-from app.schemas.auth import UserRegister, UserLogin, TokenResponse, UserResponse
+from app.schemas.auth import (
+    UserRegister,
+    UserLogin,
+    TokenResponse,
+    UserResponse,
+)
 from app.services.auth_service import (
     hash_password,
     verify_password,
     create_access_token,
-    decode_access_token,
 )
+from app.services.auth_dependencies import get_current_user
+from app.services.permissions import require_role
+
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -70,31 +72,6 @@ def login(payload: UserLogin):
 
     token = create_access_token(str(user["_id"]))
     return TokenResponse(access_token=token)
-
-
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = decode_access_token(token)
-        user_id = payload.get("sub")
-
-        if not user_id or not ObjectId.is_valid(user_id):
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = get_database()["users"].find_one({"_id": ObjectId(user_id)})
-    if not user or not user.get("is_active", False):
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-
-    return user
-
 
 @router.get("/me", response_model=UserResponse)
 def get_me(user=Depends(get_current_user)):

@@ -1,8 +1,9 @@
 from pathlib import Path
 
 from bson import ObjectId
-from fastapi import APIRouter, File, HTTPException, UploadFile
-
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from app.services.auth_dependencies import get_current_user
+import pandas as pd
 from app.database.mongodb import get_database
 from app.models.document import create_document
 from app.services.ingestion.inspector import inspect_file
@@ -30,7 +31,8 @@ ALLOWED_FILE_TYPES = {
 
 @router.post("/upload")
 async def upload_document(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(
@@ -61,8 +63,9 @@ async def upload_document(
         filename=file.filename,
         document_type="OTHER",
         source="USER",
-        file_type=file_type
-    )
+        file_type=file_type,
+        owner_id=str(current_user["_id"]),
+)
 
     result = database.documents.insert_one(document)
 
@@ -75,7 +78,10 @@ async def upload_document(
     }
 
 @router.get("/{document_id}/inspect")
-def inspect_document(document_id: str):
+def inspect_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
     database = get_database()
 
     if not ObjectId.is_valid(document_id):
@@ -84,9 +90,12 @@ def inspect_document(document_id: str):
             detail="Invalid document ID."
         )
 
-    document = database.documents.find_one(
-        {"_id": ObjectId(document_id)}
-    )
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
 
     if not document:
         raise HTTPException(
