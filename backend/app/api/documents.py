@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from app.database.mongodb import get_database
 from app.models.document import create_document
 from app.services.ingestion.inspector import inspect_file
+from app.services.ingestion.column_mapper import detect_columns
 
 router = APIRouter(
     prefix="/api/documents",
@@ -96,6 +97,10 @@ def inspect_document(document_id: str):
 
     try:
         result = inspect_file(str(file_path))
+        for sheet in result:
+            sheet["column_mapping"] = detect_columns(
+                sheet["columns"]
+            )
 
         return {
             "document_id": document_id,
