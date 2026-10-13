@@ -1,10 +1,14 @@
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from app.services.auth_dependencies import get_current_user
+import pandas as pd
 from app.database.mongodb import get_database
 from app.models.document import create_document
-
+from app.services.ingestion.inspector import inspect_file
+from app.services.ingestion.data_validator import validate_transactions
+from app.services.ingestion.column_mapper import detect_columns
 
 router = APIRouter(
     prefix="/api/documents",
@@ -27,7 +31,8 @@ ALLOWED_FILE_TYPES = {
 
 @router.post("/upload")
 async def upload_document(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(
@@ -58,8 +63,9 @@ async def upload_document(
         filename=file.filename,
         document_type="OTHER",
         source="USER",
-        file_type=file_type
-    )
+        file_type=file_type,
+        owner_id=str(current_user["_id"]),
+)
 
     result = database.documents.insert_one(document)
 
@@ -70,3 +76,82 @@ async def upload_document(
         "file_type": file_type,
         "status": document["status"]
     }
+
+@router.get("/{document_id}/inspect")
+def inspect_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID."
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found."
+        )
+
+    file_path = UPLOAD_DIR / document["filename"]
+
+    try:
+        result = inspect_file(str(file_path))
+        for sheet in result:
+            sheet["column_mapping"] = detect_columns(
+                sheet["columns"]
+            )
+            dataframe = pd.DataFrame(sheet["sample"])
+            sheet["validation_note"] = (
+        "Validation uses the sample rows only. "
+        "Full-file validation will be added in the processing pipeline."
+            )
+            if not dataframe.empty:
+                sheet["validation"] = validate_transactions(
+                    dataframe,
+                    sheet["column_mapping"]
+                )
+            else:
+                sheet["validation"] = {
+                    "valid": False,
+                    "total_rows": 0,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                    "errors": [
+                        {
+                            "row": None,
+                            "field": None,
+                            "message": "No sample rows available."
+                }
+            ],
+            "warnings": []
+        }
+
+        return {
+            "document_id": document_id,
+            "filename": document["filename"],
+            "file_type": document["file_type"],
+            "sheets": result
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to inspect document: {str(error)}"
+        )
