@@ -9,6 +9,9 @@ from app.models.document import create_document
 from app.services.ingestion.inspector import inspect_file
 from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.column_mapper import detect_columns
+from app.services.ingestion.csv_processor import process_csv_file
+from app.services.ingestion.transaction_saver import save_valid_transactions
+
 
 router = APIRouter(
     prefix="/api/documents",
@@ -155,3 +158,100 @@ def inspect_document(
             status_code=500,
             detail=f"Unable to inspect document: {str(error)}"
         )
+
+
+@router.post("/{document_id}/process")
+def process_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.get("file_type") != "CSV":
+        raise HTTPException(
+            status_code=400,
+            detail="Processing currently supports CSV files only.",
+        )
+
+    file_path = UPLOAD_DIR / document["filename"]
+
+    try:
+        result = process_csv_file(str(file_path))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    owner_id = document.get("owner_id")
+
+    if not owner_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Document has no owner_id.",
+        )
+
+    # Prevent accidental duplicate processing of the same document.
+    if database.transactions.find_one({"document_id": document_id}):
+        raise HTTPException(
+            status_code=409,
+            detail="Transactions have already been saved for this document.",
+        )
+
+    try:
+        saved_count = save_valid_transactions(
+            document_id=document_id,
+            owner_id=owner_id,
+            transactions=result["transactions"],
+        )
+
+        database.documents.update_one(
+            {"_id": ObjectId(document_id)},
+            {
+                "$set": {
+                    "status": "PROCESSED",
+                    "transaction_count": saved_count,
+                    "invalid_row_count": result["invalid_rows"],
+                    "processing_errors": result["errors"],
+                    "processed_at": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ),
+                }
+            },
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save processed transactions: {error}",
+        )
+
+    return {
+        "message": "CSV processing completed.",
+        "document_id": document_id,
+        "total_rows": result["total_rows"],
+        "valid_rows": result["valid_rows"],
+        "invalid_rows": result["invalid_rows"],
+        "saved_transactions": saved_count,
+        "column_mapping": result["column_mapping"],
+        "errors": result["errors"],
+    }
