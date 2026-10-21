@@ -255,3 +255,63 @@ def process_document(
         "column_mapping": result["column_mapping"],
         "errors": result["errors"],
     }
+
+
+@router.get("/{document_id}/transactions")
+def get_document_transactions(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    # Users can only access their own documents.
+    # Admins can access documents across users.
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    transactions = list(
+        database.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    # Convert MongoDB datetimes to JSON-friendly strings.
+    for transaction in transactions:
+        transaction_date = transaction.get("transaction_date")
+        if transaction_date is not None:
+            transaction["transaction_date"] = (
+                transaction_date.isoformat()
+            )
+
+        created_at = transaction.get("created_at")
+        if created_at is not None:
+            transaction["created_at"] = created_at.isoformat()
+
+    return {
+        "document_id": document_id,
+        "filename": document["filename"],
+        "transaction_count": len(transactions),
+        "transactions": transactions,
+        "invalid_row_count": document.get("invalid_row_count", 0),
+        "processing_errors": document.get("processing_errors", []),
+    }
