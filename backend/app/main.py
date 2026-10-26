@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.documents import router as documents_router
 from app.database.mongodb import client
 from app.api.auth import router as auth_router
+from app.api.reconciliation import router as reconciliation_router
 
 app = FastAPI(
     title="Tax Reconcile-AI",
@@ -13,6 +14,7 @@ app = FastAPI(
 
 app.include_router(documents_router)
 app.include_router(auth_router)
+app.include_router(reconciliation_router)
 
 @app.get("/")
 def root():
