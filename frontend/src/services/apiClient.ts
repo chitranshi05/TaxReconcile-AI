@@ -1,4 +1,6 @@
-﻿import type { ApiErrorResponse, ApiValidationIssue } from '../types/api'
+import type { ApiErrorResponse, ApiValidationIssue } from '../types/api'
+
+export const TOKEN_STORAGE_KEY = 'tax_reconcile_token'
 
 export class ApiError extends Error {
   readonly statusCode: number | null
@@ -13,6 +15,18 @@ export class ApiError extends Error {
     this.name = 'ApiError'
     this.statusCode = statusCode
     this.responseBody = responseBody
+  }
+}
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY)
+}
+
+export function setAuthToken(token: string | null): void {
+  if (token) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token)
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
   }
 }
 
@@ -60,6 +74,12 @@ export async function requestJson<TResponse>(
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
 
+  // Automatically attach Authorization Bearer header if token exists
+  const token = getAuthToken()
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
   let response: Response
 
   try {
@@ -70,6 +90,11 @@ export async function requestJson<TResponse>(
       null,
       error,
     )
+  }
+
+  // Clear auth token if unauthorized
+  if (response.status === 401) {
+    setAuthToken(null)
   }
 
   const responseBody: unknown = await response.json().catch(() => undefined)

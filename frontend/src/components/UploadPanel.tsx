@@ -2,6 +2,7 @@
 // Wires to POST /api/documents/upload via the documents service
 
 import { useState, useRef, type DragEvent } from 'react'
+import { uploadDocument } from '../services/documents'
 
 const ACCEPTED_TYPES = ['CSV', 'XLSX', 'XLS', 'PDF', 'JSON']
 
@@ -42,7 +43,6 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
     setMessage('')
 
     try {
-      const { uploadDocument } = await import('../services/documents')
       const result = await uploadDocument(file)
       setUploadState('success')
       setMessage(`"${result.filename}" uploaded — ID: ${result.document_id}`)

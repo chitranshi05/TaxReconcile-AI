@@ -10,7 +10,15 @@ interface StatCardProps {
   placeholder?: boolean
 }
 
-function StatCard({ icon, iconColor, value, label, sub, trend, placeholder }: StatCardProps) {
+function StatCard({
+  icon,
+  iconColor,
+  value,
+  label,
+  sub,
+  trend,
+  placeholder,
+}: StatCardProps) {
   return (
     <div className="stat-card">
       <div className="stat-card-header">
@@ -30,44 +38,74 @@ function StatCard({ icon, iconColor, value, label, sub, trend, placeholder }: St
   )
 }
 
-export function StatCards() {
+interface StatCardsProps {
+  documentsCount?: number
+  transactionsCount?: number
+  anomaliesCount?: number
+  invalidRowsCount?: number
+}
+
+export function StatCards({
+  documentsCount = 0,
+  transactionsCount = 0,
+  anomaliesCount = 0,
+  invalidRowsCount = 0,
+}: StatCardsProps) {
+  const hasDocuments = documentsCount > 0
+
   return (
     <div className="stats-grid">
       <StatCard
         icon="📄"
         iconColor="purple"
-        value="—"
+        value={documentsCount}
         label="Documents Uploaded"
-        sub="All time"
-        trend={{ direction: 'neutral', label: 'No data' }}
-        placeholder
+        sub="Total files tracked"
+        trend={
+          hasDocuments
+            ? { direction: 'up', label: `${documentsCount} active` }
+            : { direction: 'neutral', label: 'No files yet' }
+        }
+        placeholder={!hasDocuments}
       />
       <StatCard
         icon="✅"
         iconColor="green"
-        value="—"
+        value={transactionsCount.toLocaleString()}
         label="Transactions Processed"
-        sub="Valid rows saved"
-        trend={{ direction: 'neutral', label: 'No data' }}
-        placeholder
+        sub="Valid rows extracted"
+        trend={
+          transactionsCount > 0
+            ? { direction: 'up', label: `${transactionsCount} records` }
+            : { direction: 'neutral', label: 'Awaiting process' }
+        }
+        placeholder={transactionsCount === 0}
       />
       <StatCard
         icon="🔍"
         iconColor="blue"
-        value="—"
+        value={anomaliesCount}
         label="Anomalies Detected"
         sub="Flagged for review"
-        trend={{ direction: 'neutral', label: 'No data' }}
-        placeholder
+        trend={
+          anomaliesCount > 0
+            ? { direction: 'down', label: `${anomaliesCount} flagged` }
+            : { direction: 'neutral', label: 'None flagged' }
+        }
+        placeholder={anomaliesCount === 0}
       />
       <StatCard
         icon="⚠️"
         iconColor="red"
-        value="—"
+        value={invalidRowsCount}
         label="Invalid Rows"
-        sub="Failed validation"
-        trend={{ direction: 'neutral', label: 'No data' }}
-        placeholder
+        sub="Validation errors"
+        trend={
+          invalidRowsCount > 0
+            ? { direction: 'down', label: `${invalidRowsCount} failed` }
+            : { direction: 'neutral', label: 'Clean ingestion' }
+        }
+        placeholder={invalidRowsCount === 0}
       />
     </div>
   )

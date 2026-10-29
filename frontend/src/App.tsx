@@ -4,10 +4,13 @@ import './App.css'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { DashboardPage } from './pages/DashboardPage'
+import { LoginPage } from './pages/LoginPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 
 import { getHealth } from './services/backend'
-import type { HealthResponse } from './types/api'
+import { getMe, logout, isAuthenticated } from './services/auth'
+import { loadDocuments } from './services/documents'
+import type { HealthResponse, UserResponse } from './types/api'
 
 // ─── Page config ──────────────────────────────────────────────────
 type PageId =
@@ -52,8 +55,31 @@ const PAGE_META: Record<PageId, { title: string; subtitle: string }> = {
 
 // ─── App ──────────────────────────────────────────────────────────
 function App() {
+  const [user, setUser] = useState<UserResponse | null>(null)
+  const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [activePage, setActivePage] = useState<PageId>('dashboard')
   const [health, setHealth] = useState<HealthResponse['status'] | 'loading'>('loading')
+  const [documentsCount, setDocumentsCount] = useState<number>(() => loadDocuments().length)
+
+  // Verify authentication on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      setIsAuthLoading(false)
+      return
+    }
+
+    getMe()
+      .then((userData) => {
+        setUser(userData)
+      })
+      .catch(() => {
+        logout()
+        setUser(null)
+      })
+      .finally(() => {
+        setIsAuthLoading(false)
+      })
+  }, [])
 
   // Poll backend health on mount
   useEffect(() => {
@@ -61,6 +87,32 @@ function App() {
       .then((res) => setHealth(res.status))
       .catch(() => setHealth('unhealthy'))
   }, [])
+
+  const handleAuthSuccess = (authenticatedUser: UserResponse) => {
+    setUser(authenticatedUser)
+  }
+
+  const handleLogout = () => {
+    logout()
+    setUser(null)
+  }
+
+  // Loading spinner during auth check
+  if (isAuthLoading) {
+    return (
+      <div className="auth-loading-screen">
+        <div className="auth-loading-content">
+          <div className="auth-brand-icon">🧾</div>
+          <p>Connecting to TaxReconcile AI…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Auth gate: If not signed in, show Login / Register
+  if (!user) {
+    return <LoginPage onSuccess={handleAuthSuccess} />
+  }
 
   const { title, subtitle } = PAGE_META[activePage]
 
@@ -71,6 +123,7 @@ function App() {
           <DashboardPage
             onNavigate={(p) => setActivePage(p as PageId)}
             onUpload={() => setActivePage('documents')}
+            onDocumentsChange={(count) => setDocumentsCount(count)}
           />
         )
       case 'documents':
@@ -126,7 +179,13 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} onNavigate={(p) => setActivePage(p as PageId)} />
+      <Sidebar
+        activePage={activePage}
+        onNavigate={(p) => setActivePage(p as PageId)}
+        user={user}
+        onLogout={handleLogout}
+        documentsCount={documentsCount}
+      />
 
       <TopBar
         title={title}
