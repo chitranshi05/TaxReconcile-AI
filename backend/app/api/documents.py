@@ -12,6 +12,7 @@ from app.services.ingestion.column_mapper import detect_columns
 from app.services.ingestion.csv_processor import process_csv_file
 from app.services.ingestion.transaction_saver import save_valid_transactions
 from app.services.ingestion.duplicate_detector import detect_duplicates
+from app.services.ingestion.anomaly_detector import detect_anomalies
 
 
 router = APIRouter(
@@ -383,3 +384,86 @@ def get_document_duplicates(
         "flagged_transactions": duplicate_result["flagged_transactions"],
     }
 
+
+
+@router.get("/{document_id}/anomalies")
+def get_document_anomalies(
+    document_id: str,
+    iqr_multiplier: float = 1.5,
+    min_samples_for_iqr: int = 4,
+    frequency_threshold: int = 10,
+    round_amount_min: float = 5000.0,
+    round_amount_min_occurrences: int = 2,
+    separate_debit_credit: bool = True,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retrieve stored transactions for a document and run anomaly detection.
+    Identifies statistical outliers (IQR), unusual debits/credits, repeated
+    round sums, and high-frequency transaction bursts for tax review.
+    """
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    transactions = list(
+        database.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    result = detect_anomalies(
+        transactions=transactions,
+        iqr_multiplier=iqr_multiplier,
+        min_samples_for_iqr=min_samples_for_iqr,
+        frequency_threshold=frequency_threshold,
+        round_amount_min=round_amount_min,
+        round_amount_min_occurrences=round_amount_min_occurrences,
+        separate_debit_credit=separate_debit_credit,
+    )
+
+    # Convert datetimes to ISO strings for JSON output
+    for tx in result["flagged_transactions"]:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+
+        created_at = tx.get("created_at")
+        if created_at is not None and hasattr(created_at, "isoformat"):
+            tx["created_at"] = created_at.isoformat()
+
+    return {
+        "document_id": document_id,
+        "filename": document["filename"],
+        "total_transactions": result["total_transactions"],
+        "anomalous_transactions_count": result["anomalous_transactions_count"],
+        "normal_transactions_count": result["normal_transactions_count"],
+        "anomaly_rate": result["anomaly_rate"],
+        "flag_counts": result["flag_counts"],
+        "statistics": result["statistics"],
+        "anomalies": result["anomalies"],
+        "flagged_transactions": result["flagged_transactions"],
+        "notes": result["notes"],
+        "disclaimer": result["disclaimer"],
+    }
