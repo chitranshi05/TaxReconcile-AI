@@ -413,12 +413,28 @@ def process_document(
                 }
             },
         )
-
     except Exception as error:
+        try:
+            database.transactions.delete_many(
+                {
+                    "document_id": document_id,
+                    "owner_id": owner_id,
+                }
+            )
+        except Exception as rollback_error:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to save processed transactions: {error}. "
+                    "Rollback of saved transactions also failed: "
+                    f"{rollback_error}"
+                ),
+            ) from rollback_error
+
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save processed transactions: {error}",
-        )
+        ) from error
 
     return {
         "message": "CSV processing completed.",
