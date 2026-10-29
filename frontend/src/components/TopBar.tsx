@@ -1,4 +1,6 @@
-// TopBar — page title, health indicator, and action buttons
+// TopBar — page title, health indicator, theme switcher, and action buttons
+
+import { ThemeSwitcher } from './ThemeSwitcher'
 
 interface TopBarProps {
   title: string
@@ -34,6 +36,8 @@ export function TopBar({ title, subtitle, health, onUpload }: TopBarProps) {
       </div>
 
       <div className="topbar-right">
+        <ThemeSwitcher />
+
         <HealthPill status={health} />
 
         <button

@@ -1,0 +1,241 @@
+@font-face {
+  src: url("https://assets.codepen.io/2392/Silkscreen-Regular.woff2") format("woff2");
+  font-family: "Silkscreen";
+  font-display: swap;
+}
+
+/* ─── Root Theme Tokens & Integration ────────────────────────────── */
+:root {
+  --white: 0 0 90%;
+  --black: 0 0 10%;
+  --gray: 0 0 45%;
+
+  --gold: 36deg 75% 33%;
+  --turq: 150deg 55% 35%;
+
+  /* Dynamic theme accent & canvas matching the prompt */
+  --theme-accent: hsl(var(--turq));
+  --theme-canvas: hsl(var(--black));
+  --theme-text: hsl(var(--white));
+  --theme-border-color: color-mix(in oklab, var(--theme-accent), transparent 70%);
+  --theme-outline-color: color-mix(in oklab, var(--theme-accent), transparent 25%);
+}
+
+/* Light mode overrides */
+:root[data-theme="light"],
+:root:not([data-theme="dark"]):not([data-theme="light"]) {
+  @media (prefers-color-scheme: light) {
+    --theme-accent: hsl(var(--gold));
+    --theme-canvas: hsl(var(--white));
+    --theme-text: hsl(var(--black));
+    --theme-border-color: color-mix(in oklab, var(--theme-accent), transparent 80%);
+    --theme-outline-color: color-mix(in oklab, var(--theme-accent), transparent 25%);
+
+    /* Project system theme adaptations for light mode */
+    --bg-base: #f0f2f5;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f8fafc;
+    --bg-overlay: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border-subtle: rgba(0, 0, 0, 0.08);
+    --border-default: rgba(0, 0, 0, 0.16);
+    --border-strong: rgba(0, 0, 0, 0.24);
+  }
+}
+
+:root[data-theme="light"] {
+  --theme-accent: hsl(var(--gold));
+  --theme-canvas: hsl(var(--white));
+  --theme-text: hsl(var(--black));
+  --theme-border-color: color-mix(in oklab, var(--theme-accent), transparent 80%);
+  --theme-outline-color: color-mix(in oklab, var(--theme-accent), transparent 25%);
+
+  --bg-base: #f0f2f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f8fafc;
+  --bg-overlay: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-default: rgba(0, 0, 0, 0.16);
+  --border-strong: rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="dark"] {
+  --theme-accent: hsl(var(--turq));
+  --theme-canvas: hsl(var(--black));
+  --theme-text: hsl(var(--white));
+  --theme-border-color: color-mix(in oklab, var(--theme-accent), transparent 70%);
+  --theme-outline-color: color-mix(in oklab, var(--theme-accent), transparent 25%);
+
+  --bg-base: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2330;
+  --bg-overlay: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+}
+
+/* ─── Fieldset Component ─────────────────────────────────────────── */
+#color-scheme.theme-switcher {
+  border: 2px solid var(--theme-border-color);
+  border-radius: 6px;
+  color: var(--theme-text);
+  outline: 3px ridge var(--theme-outline-color);
+  outline-offset: 1px;
+
+  filter:
+    drop-shadow(
+      0 0 6px
+      color-mix(
+        in oklab,
+        var(--theme-accent),
+        transparent 50%
+      )
+    );
+
+  font-family: "Silkscreen", monospace;
+  font-size: 11px;
+  letter-spacing: -0.05ch;
+  text-rendering: geometricprecision;
+
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 2px 6px 4px;
+  position: relative;
+  z-index: 3;
+  box-sizing: border-box;
+}
+
+#color-scheme.theme-switcher legend {
+  color: color-mix(in oklab, var(--theme-accent), transparent 20%);
+  text-align: center;
+  font-size: 9px;
+  padding: 0 4px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Labels */
+#color-scheme.theme-switcher label {
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-out;
+  line-height: 1;
+}
+
+#color-scheme.theme-switcher label span {
+  display: inline-block;
+  font-size: 10px;
+}
+
+/* Checked state */
+#color-scheme.theme-switcher label:has(:checked) {
+  background: var(--theme-text);
+  color: var(--theme-canvas);
+}
+
+#color-scheme.theme-switcher label:has(:checked) input {
+  color: var(--theme-accent);
+}
+
+/* Focus styles */
+#color-scheme.theme-switcher label:is(:focus-visible),
+#color-scheme.theme-switcher label:has(:focus-within) {
+  outline: 2px solid color-mix(in oklab, var(--theme-accent), transparent 40%);
+  outline-offset: -2px;
+}
+
+#color-scheme.theme-switcher label:is(:focus-visible):not(:has(:checked)):hover {
+  background: color-mix(in oklab, var(--theme-accent), transparent 84%);
+}
+
+/* ─── Diamond Radio Pin ─────────────────────────────────────────── */
+#color-scheme.theme-switcher input[type="radio"] {
+  --d: 8px;
+  --rotation: 45deg;
+
+  appearance: none;
+  background: currentColor;
+  color: inherit;
+  border: none;
+  border-radius: 2px;
+  transform: rotate(var(--rotation));
+  margin: 0;
+  outline: 1.5px solid color-mix(in oklab, var(--theme-text), transparent 50%);
+  outline-offset: 1.5px;
+  height: var(--d);
+  width: var(--d);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.2s ease-out, outline-color 0.2s ease-out;
+}
+
+#color-scheme.theme-switcher label:hover input[type="radio"]:not(:checked) {
+  --rotation: 90deg;
+  transform: rotate(var(--rotation));
+  outline-color: color-mix(in oklab, var(--theme-text), transparent 75%);
+}
+
+#color-scheme.theme-switcher input[type="radio"]:checked {
+  transform: rotate(0deg);
+  color: inherit;
+  outline-color: color-mix(in oklab, var(--theme-accent), transparent 10%);
+  outline-offset: 2px;
+}
+
+#color-scheme.theme-switcher label:hover input[type="radio"]:checked {
+  outline-color: var(--theme-accent);
+}
+
+/* ─── Responsive Adjustments ────────────────────────────────────── */
+@media (max-width: 768px) {
+  #color-scheme.theme-switcher {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+
+  #color-scheme.theme-switcher label {
+    padding: 3px 5px;
+    gap: 3px;
+  }
+
+  #color-scheme.theme-switcher label span {
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 480px) {
+  #color-scheme.theme-switcher legend {
+    display: none;
+  }
+
+  #color-scheme.theme-switcher {
+    border-width: 1px;
+    outline-width: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #color-scheme.theme-switcher,
+  #color-scheme.theme-switcher label,
+  #color-scheme.theme-switcher input {
+    transition: background 0.2s ease-out, border-color 0.2s ease-out, color 0.2s ease-out, transform 0.2s ease-out;
+  }
+}
