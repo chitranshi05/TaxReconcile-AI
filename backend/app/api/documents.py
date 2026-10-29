@@ -21,6 +21,7 @@ Security notes
 """
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -367,16 +368,6 @@ def process_document(
             detail="Processing currently supports CSV files only.",
         )
 
-    file_path = UPLOAD_DIR / document["filename"]
-
-    try:
-        result = process_csv_file(str(file_path))
-    except ValueError as error:
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
     owner_id = document.get("owner_id")
 
     if not owner_id:
@@ -385,12 +376,114 @@ def process_document(
             detail="Document has no owner_id.",
         )
 
-    # Prevent accidental duplicate processing of the same document.
-    if database.transactions.find_one({"document_id": document_id}):
+    current_status = document.get("status", "UPLOADED")
+    if (
+        not isinstance(current_status, str)
+        or current_status.strip().upper() not in {"UPLOADED", "FAILED"}
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Document is already being processed or has already been processed.",
+        )
+
+    failed_retry = current_status.strip().upper() == "FAILED"
+    transaction_query = {"document_id": document_id, "owner_id": owner_id}
+    if not failed_retry and database.transactions.find_one(transaction_query):
         raise HTTPException(
             status_code=409,
             detail="Transactions have already been saved for this document.",
         )
+
+    status_query = {"_id": ObjectId(document_id)}
+    if "status" in document:
+        status_query["status"] = document["status"]
+    else:
+        status_query["status"] = {"$exists": False}
+
+    claim_result = database.documents.update_one(
+        status_query,
+        {
+            "$set": {
+                "status": "PENDING",
+                "status_updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )
+    if claim_result.matched_count != 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Document is already being processed or has already been processed.",
+        )
+
+    def mark_processing_failed() -> None:
+        failed_result = database.documents.update_one(
+            {"_id": ObjectId(document_id), "status": "PENDING"},
+            {
+                "$set": {
+                    "status": "FAILED",
+                    "status_updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        if failed_result.matched_count != 1:
+            raise RuntimeError("Document status could not be marked as FAILED.")
+
+    if failed_retry:
+        try:
+            database.transactions.delete_many(transaction_query)
+        except Exception as error:
+            try:
+                mark_processing_failed()
+            except Exception as status_error:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Failed to clean up transactions from the previous "
+                        f"processing attempt: {error}. "
+                        f"Failed to mark document as FAILED: {status_error}"
+                    ),
+                ) from status_error
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Failed to clean up transactions from the previous "
+                    f"processing attempt: {error}"
+                ),
+            ) from error
+
+    file_path = UPLOAD_DIR / document["filename"]
+    try:
+        result = process_csv_file(str(file_path))
+    except ValueError as error:
+        try:
+            mark_processing_failed()
+        except Exception as status_error:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to process document: {error}. "
+                    f"Failed to mark document as FAILED: {status_error}"
+                ),
+            ) from status_error
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        try:
+            mark_processing_failed()
+        except Exception as status_error:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Failed to process document: {error}. "
+                    f"Failed to mark document as FAILED: {status_error}"
+                ),
+            ) from status_error
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process document: {error}",
+        ) from error
 
     try:
         saved_count = save_valid_transactions(
@@ -399,21 +492,23 @@ def process_document(
             transactions=result["transactions"],
         )
 
-        database.documents.update_one(
-            {"_id": ObjectId(document_id)},
+        status_result = database.documents.update_one(
+            {"_id": ObjectId(document_id), "status": "PENDING"},
             {
                 "$set": {
                     "status": "PROCESSED",
                     "transaction_count": saved_count,
                     "invalid_row_count": result["invalid_rows"],
                     "processing_errors": result["errors"],
-                    "processed_at": __import__("datetime").datetime.now(
-                        __import__("datetime").timezone.utc
-                    ),
+                    "processed_at": datetime.now(timezone.utc),
+                    "status_updated_at": datetime.now(timezone.utc),
                 }
             },
         )
+        if status_result.matched_count != 1:
+            raise RuntimeError("Document status could not be updated to PROCESSED.")
     except Exception as error:
+        rollback_error = None
         try:
             database.transactions.delete_many(
                 {
@@ -421,19 +516,23 @@ def process_document(
                     "owner_id": owner_id,
                 }
             )
-        except Exception as rollback_error:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Failed to save processed transactions: {error}. "
-                    "Rollback of saved transactions also failed: "
-                    f"{rollback_error}"
-                ),
-            ) from rollback_error
+        except Exception as delete_error:
+            rollback_error = delete_error
 
+        status_error = None
+        try:
+            mark_processing_failed()
+        except Exception as update_error:
+            status_error = update_error
+
+        detail = f"Failed to save processed transactions: {error}"
+        if rollback_error is not None:
+            detail += f". Rollback of saved transactions also failed: {rollback_error}"
+        if status_error is not None:
+            detail += f". Failed to mark document as FAILED: {status_error}"
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to save processed transactions: {error}",
+            detail=detail,
         ) from error
 
     return {
