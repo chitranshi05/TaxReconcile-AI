@@ -32,7 +32,7 @@ export function setAuthToken(token: string | null): void {
 
 function getApiBaseUrl(): string {
   const baseUrl =
-    import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:8000'
+    import.meta.env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:8000'
 
   return baseUrl.replace(/\/+$/, '')
 }
