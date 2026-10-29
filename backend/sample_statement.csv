@@ -1,0 +1,4 @@
+Transaction Date,Narration,Withdrawal,Deposit,Closing Balance
+2026-04-01,Salary,0,50000,50000
+2026-04-03,Shopping,2000,0,48000
+invalid-date,Interest,0,500,48500

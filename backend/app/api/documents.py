@@ -36,6 +36,11 @@ from app.services.auth_dependencies import get_current_user
 from app.services.ingestion.column_mapper import detect_columns
 from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.inspector import inspect_file
+from app.services.ingestion.csv_processor import process_csv_file
+from app.services.ingestion.transaction_saver import save_valid_transactions
+from app.services.ingestion.duplicate_detector import detect_duplicates
+from app.services.ingestion.anomaly_detector import detect_anomalies
+
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -330,6 +335,229 @@ def delete_document(
     }
 
 
+@router.post("/{document_id}/process")
+def process_document(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.get("file_type") != "CSV":
+        raise HTTPException(
+            status_code=400,
+            detail="Processing currently supports CSV files only.",
+        )
+
+    file_path = UPLOAD_DIR / document["filename"]
+
+    try:
+        result = process_csv_file(str(file_path))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    owner_id = document.get("owner_id")
+
+    if not owner_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Document has no owner_id.",
+        )
+
+    # Prevent accidental duplicate processing of the same document.
+    if database.transactions.find_one({"document_id": document_id}):
+        raise HTTPException(
+            status_code=409,
+            detail="Transactions have already been saved for this document.",
+        )
+
+    try:
+        saved_count = save_valid_transactions(
+            document_id=document_id,
+            owner_id=owner_id,
+            transactions=result["transactions"],
+        )
+
+        database.documents.update_one(
+            {"_id": ObjectId(document_id)},
+            {
+                "$set": {
+                    "status": "PROCESSED",
+                    "transaction_count": saved_count,
+                    "invalid_row_count": result["invalid_rows"],
+                    "processing_errors": result["errors"],
+                    "processed_at": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ),
+                }
+            },
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save processed transactions: {error}",
+        )
+
+    return {
+        "message": "CSV processing completed.",
+        "document_id": document_id,
+        "total_rows": result["total_rows"],
+        "valid_rows": result["valid_rows"],
+        "invalid_rows": result["invalid_rows"],
+        "saved_transactions": saved_count,
+        "column_mapping": result["column_mapping"],
+        "errors": result["errors"],
+    }
+
+
+@router.get("/{document_id}/transactions")
+def get_document_transactions(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    # Users can only access their own documents.
+    # Admins can access documents across users.
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    transactions = list(
+        database.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    # Convert MongoDB datetimes to JSON-friendly strings.
+    for transaction in transactions:
+        transaction_date = transaction.get("transaction_date")
+        if transaction_date is not None:
+            transaction["transaction_date"] = (
+                transaction_date.isoformat()
+            )
+
+        created_at = transaction.get("created_at")
+        if created_at is not None:
+            transaction["created_at"] = created_at.isoformat()
+
+    return {
+        "document_id": document_id,
+        "filename": document["filename"],
+        "transaction_count": len(transactions),
+        "transactions": transactions,
+        "invalid_row_count": document.get("invalid_row_count", 0),
+        "processing_errors": document.get("processing_errors", []),
+    }
+
+
+@router.get("/{document_id}/duplicates")
+def get_document_duplicates(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retrieve stored transactions for a document and identify duplicate candidates.
+    Flags matching date, normalized description, and amount/debit/credit for review.
+    """
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    transactions = list(
+        database.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    duplicate_result = detect_duplicates(transactions)
+
+    # Convert datetimes to ISO strings for JSON response
+    for transaction in duplicate_result["flagged_transactions"]:
+        transaction_date = transaction.get("transaction_date")
+        if transaction_date is not None and hasattr(transaction_date, "isoformat"):
+            transaction["transaction_date"] = transaction_date.isoformat()
+
+        created_at = transaction.get("created_at")
+        if created_at is not None and hasattr(created_at, "isoformat"):
+            transaction["created_at"] = created_at.isoformat()
+
+    return {
+        "document_id": document_id,
+        "filename": document["filename"],
+        "total_transactions": duplicate_result["total_transactions"],
+        "unique_count": duplicate_result["unique_count"],
+        "original_count": duplicate_result["original_count"],
+        "duplicate_count": duplicate_result["duplicate_count"],
+        "duplicate_groups_count": duplicate_result["duplicate_groups_count"],
+        "duplicates": duplicate_result["duplicates"],
+        "duplicate_groups": duplicate_result["duplicate_groups"],
+        "flagged_transactions": duplicate_result["flagged_transactions"],
+    }
+
+
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -349,4 +577,85 @@ def _serialize_document(doc: dict) -> dict:
         "uploaded_at": doc.get("uploaded_at", "").isoformat()
         if doc.get("uploaded_at")
         else None,
+    }
+@router.get("/{document_id}/anomalies")
+def get_document_anomalies(
+    document_id: str,
+    iqr_multiplier: float = 1.5,
+    min_samples_for_iqr: int = 4,
+    frequency_threshold: int = 10,
+    round_amount_min: float = 5000.0,
+    round_amount_min_occurrences: int = 2,
+    separate_debit_credit: bool = True,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retrieve stored transactions for a document and run anomaly detection.
+    Identifies statistical outliers (IQR), unusual debits/credits, repeated
+    round sums, and high-frequency transaction bursts for tax review.
+    """
+    database = get_database()
+
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid document ID.",
+        )
+
+    query = {"_id": ObjectId(document_id)}
+
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    document = database.documents.find_one(query)
+
+    if not document:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    transactions = list(
+        database.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    result = detect_anomalies(
+        transactions=transactions,
+        iqr_multiplier=iqr_multiplier,
+        min_samples_for_iqr=min_samples_for_iqr,
+        frequency_threshold=frequency_threshold,
+        round_amount_min=round_amount_min,
+        round_amount_min_occurrences=round_amount_min_occurrences,
+        separate_debit_credit=separate_debit_credit,
+    )
+
+    # Convert datetimes to ISO strings for JSON output
+    for tx in result["flagged_transactions"]:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+
+        created_at = tx.get("created_at")
+        if created_at is not None and hasattr(created_at, "isoformat"):
+            tx["created_at"] = created_at.isoformat()
+
+    return {
+        "document_id": document_id,
+        "filename": document["filename"],
+        "total_transactions": result["total_transactions"],
+        "anomalous_transactions_count": result["anomalous_transactions_count"],
+        "normal_transactions_count": result["normal_transactions_count"],
+        "anomaly_rate": result["anomaly_rate"],
+        "flag_counts": result["flag_counts"],
+        "statistics": result["statistics"],
+        "anomalies": result["anomalies"],
+        "flagged_transactions": result["flagged_transactions"],
+        "notes": result["notes"],
+        "disclaimer": result["disclaimer"],
     }
