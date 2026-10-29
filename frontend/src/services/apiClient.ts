@@ -31,13 +31,8 @@ export function setAuthToken(token: string | null): void {
 }
 
 function getApiBaseUrl(): string {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
-
-  if (!baseUrl) {
-    throw new Error(
-      'VITE_API_BASE_URL is missing. Set it in frontend/.env.local.',
-    )
-  }
+  const baseUrl =
+    import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:8000'
 
   return baseUrl.replace(/\/+$/, '')
 }

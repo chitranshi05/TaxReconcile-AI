@@ -3,17 +3,16 @@ import { defineConfig, loadEnv } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const { VITE_API_BASE_URL } = loadEnv(mode, process.cwd(), 'VITE_')
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
+  const apiBaseUrl = env.VITE_API_BASE_URL || 'http://localhost:8000'
 
   return {
     plugins: [react()],
     server: {
-      proxy: VITE_API_BASE_URL
-        ? {
-            '/api': { target: VITE_API_BASE_URL, changeOrigin: true },
-            '/health': { target: VITE_API_BASE_URL, changeOrigin: true },
-          }
-        : undefined,
+      proxy: {
+        '/api': { target: apiBaseUrl, changeOrigin: true },
+        '/health': { target: apiBaseUrl, changeOrigin: true },
+      },
     },
   }
 })
