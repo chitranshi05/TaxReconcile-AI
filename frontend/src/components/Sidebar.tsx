@@ -40,11 +40,11 @@ export function Sidebar({
 }: SidebarProps) {
   const userInitials = user?.name
     ? user.name
-        .split(' ')
-        .map((part) => part[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
+      .split(' ')
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2)
     : 'U'
 
   return (

@@ -45,3 +45,4 @@ export async function getMe(): Promise<UserResponse> {
 export function isAuthenticated(): boolean {
   return Boolean(getAuthToken())
 }
+

@@ -162,62 +162,62 @@ export function DocumentsTable({
             {documents === undefined
               ? Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)
               : documents.map((doc) => {
-                  const isProcessing = processingId === doc.document_id
-                  const isInspecting = inspectingId === doc.document_id
+                const isProcessing = processingId === doc.document_id
+                const isInspecting = inspectingId === doc.document_id
 
-                  return (
-                    <tr key={doc.document_id} id={`doc-row-${doc.document_id}`}>
-                      <td className="primary">
-                        <span className="table-file-icon">
-                          {FILE_ICONS[doc.file_type] ?? '📄'}
-                        </span>
-                        {doc.filename}
-                      </td>
-                      <td>{doc.file_type}</td>
-                      <td>
-                        <StatusBadge status={doc.status} />
-                      </td>
-                      <td>
-                        {doc.transaction_count !== undefined
-                          ? doc.transaction_count.toLocaleString()
-                          : '—'}
-                      </td>
-                      <td>
-                        {doc.uploaded_at
-                          ? new Date(doc.uploaded_at).toLocaleDateString()
-                          : '—'}
-                      </td>
-                      <td>
-                        <div className="row-actions">
+                return (
+                  <tr key={doc.document_id} id={`doc-row-${doc.document_id}`}>
+                    <td className="primary">
+                      <span className="table-file-icon">
+                        {FILE_ICONS[doc.file_type] ?? '📄'}
+                      </span>
+                      {doc.filename}
+                    </td>
+                    <td>{doc.file_type}</td>
+                    <td>
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td>
+                      {doc.transaction_count !== undefined
+                        ? doc.transaction_count.toLocaleString()
+                        : '—'}
+                    </td>
+                    <td>
+                      {doc.uploaded_at
+                        ? new Date(doc.uploaded_at).toLocaleDateString()
+                        : '—'}
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="action-btn"
+                          disabled={isInspecting || isProcessing}
+                          onClick={() => handleInspectClick(doc.document_id)}
+                          title="Inspect columns and schema"
+                        >
+                          {isInspecting ? 'Inspecting…' : 'Inspect'}
+                        </button>
+                        {doc.status !== 'PROCESSED' && doc.file_type === 'CSV' && (
                           <button
                             type="button"
                             className="action-btn"
-                            disabled={isInspecting || isProcessing}
-                            onClick={() => handleInspectClick(doc.document_id)}
-                            title="Inspect columns and schema"
+                            disabled={isProcessing || isInspecting}
+                            onClick={() => handleProcessClick(doc.document_id)}
+                            style={{
+                              color: 'var(--brand-end)',
+                              borderColor: 'var(--border-brand)',
+                            }}
+                            title="Process CSV and extract transactions"
                           >
-                            {isInspecting ? 'Inspecting…' : 'Inspect'}
+                            {isProcessing ? 'Processing…' : 'Process'}
                           </button>
-                          {doc.status !== 'PROCESSED' && doc.file_type === 'CSV' && (
-                            <button
-                              type="button"
-                              className="action-btn"
-                              disabled={isProcessing || isInspecting}
-                              onClick={() => handleProcessClick(doc.document_id)}
-                              style={{
-                                color: 'var(--brand-end)',
-                                borderColor: 'var(--border-brand)',
-                              }}
-                              title="Process CSV and extract transactions"
-                            >
-                              {isProcessing ? 'Processing…' : 'Process'}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
           </tbody>
         </table>
       )}
