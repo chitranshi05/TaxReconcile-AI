@@ -82,6 +82,12 @@ def run_reconciliation(
             detail="Ledger document not found or you are not authorized to access it.",
         )
 
+    if bank_doc.get("owner_id") != ledger_doc.get("owner_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Both documents must belong to the same owner.",
+        )
+
     # Fetch transactions from MongoDB
     bank_transactions = list(
         database.transactions.find(
@@ -130,7 +136,7 @@ def run_reconciliation(
 
     # Persist reconciliation outcome for review
     reconciliation_record = {
-        "owner_id": user_id,
+        "owner_id": bank_doc.get("owner_id"),
         "bank_document_id": request.bank_document_id,
         "ledger_document_id": request.ledger_document_id,
         "bank_filename": bank_doc.get("filename"),
