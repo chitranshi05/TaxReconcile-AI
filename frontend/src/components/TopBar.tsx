@@ -1,19 +1,33 @@
-// TopBar — page title, health indicator, theme switcher, and action buttons
-
+import { BrandMark } from './BrandMark'
 import { ThemeSwitcher } from './ThemeSwitcher'
+import { Timecode } from './Timecode'
 
 interface TopBarProps {
   title: string
   subtitle: string
   health: 'healthy' | 'unhealthy' | 'loading'
   onUpload?: () => void
+  activePage: string
+  onNavigate: (page: string) => void
+  onMenu: () => void
+  menuOpen?: boolean
 }
+
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'transactions', label: 'Ledger' },
+  { id: 'reconciliation', label: 'Match' },
+  { id: 'anomalies', label: 'Flags' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'settings', label: 'Settings' },
+]
 
 function HealthPill({ status }: { status: TopBarProps['health'] }) {
   const labels = {
-    healthy: 'API Healthy',
-    unhealthy: 'API Offline',
-    loading: 'Checking…',
+    healthy: 'API live',
+    unhealthy: 'API dark',
+    loading: 'Checking',
   }
   return (
     <div
@@ -27,37 +41,73 @@ function HealthPill({ status }: { status: TopBarProps['health'] }) {
   )
 }
 
-export function TopBar({ title, subtitle, health, onUpload }: TopBarProps) {
+export function TopBar({
+  health,
+  onUpload,
+  activePage,
+  onNavigate,
+  onMenu,
+  menuOpen = false,
+}: TopBarProps) {
   return (
-    <header className="topbar" aria-label="Page header">
-      <div className="topbar-left">
-        <h1 className="topbar-title">{title}</h1>
-        <p className="topbar-subtitle">{subtitle}</p>
-      </div>
-
-      <div className="topbar-right">
-        <ThemeSwitcher />
-
-        <HealthPill status={health} />
-
-        <button
-          id="topbar-docs-btn"
-          className="topbar-btn"
-          title="View API documentation"
+    <header className="header" aria-label="Page header">
+      <div className="header-row wrap">
+        <a
+          className="brand"
+          href="#main-content"
+          onClick={(e) => {
+            e.preventDefault()
+            onNavigate('dashboard')
+          }}
+          aria-label="TaxReconcile, home"
         >
-          📖 API Docs
-        </button>
+          <BrandMark />
+          <span className="brand-word">TaxReconcile</span>
+        </a>
 
-        {onUpload && (
+        <Timecode />
+
+        <nav className="nav" aria-label="Primary">
+          <ul className="nav-list">
+            {NAV.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={`nav-link${activePage === item.id ? ' is-current' : ''}`}
+                  onClick={() => onNavigate(item.id)}
+                  aria-current={activePage === item.id ? 'page' : undefined}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="header-actions">
+          <ThemeSwitcher />
+          <HealthPill status={health} />
+          {onUpload && (
+            <button
+              id="topbar-upload-btn"
+              className="topbar-btn primary"
+              onClick={onUpload}
+              title="Upload a new document"
+            >
+              Upload
+            </button>
+          )}
           <button
-            id="topbar-upload-btn"
-            className="topbar-btn primary"
-            onClick={onUpload}
-            title="Upload a new document"
+            id="topbar-docs-btn"
+            className="menu-btn mono"
+            type="button"
+            aria-expanded={menuOpen}
+            aria-controls="site-menu"
+            onClick={onMenu}
           >
-            ＋ Upload
+            Menu
           </button>
-        )}
+        </div>
       </div>
     </header>
   )

@@ -1,10 +1,9 @@
-// ActivityFeed — recent system activity log driven by document events
-
 import type { DocumentListItem } from '../types/api'
 
 export interface ActivityEvent {
   id: string
   color: 'green' | 'blue' | 'yellow' | 'red' | 'purple'
+  cue: string
   message: string
   meta: string
 }
@@ -15,13 +14,12 @@ interface ActivityFeedProps {
 }
 
 export function ActivityFeed({ events, documents }: ActivityFeedProps) {
-  // If custom events are provided, use them; otherwise derive from tracked documents
   let items: ActivityEvent[] = []
 
   if (events && events.length > 0) {
     items = events
   } else if (documents && documents.length > 0) {
-    items = documents.slice(0, 5).map((doc) => {
+    items = documents.slice(0, 5).map((doc, idx) => {
       const isProcessed = doc.status === 'PROCESSED'
       const isFailed = doc.status === 'FAILED'
       const color: ActivityEvent['color'] = isProcessed
@@ -30,22 +28,26 @@ export function ActivityFeed({ events, documents }: ActivityFeedProps) {
           ? 'red'
           : 'blue'
 
+      const cue = isProcessed ? 'TAKE' : isFailed ? 'HOLD' : 'SYNC'
+
       const dateStr = doc.uploaded_at
         ? new Date(doc.uploaded_at).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
+            second: '2-digit',
           })
-        : 'Recently'
+        : 'LIVE'
 
       const statusNote = isProcessed
-        ? `Processed (${doc.transaction_count || 0} txns)`
+        ? `Extracted ${doc.transaction_count || 0} rows`
         : isFailed
-          ? 'Failed processing'
-          : 'Uploaded & ready'
+          ? 'Processing halted'
+          : 'Ingested · Awaiting process'
 
       return {
-        id: doc.document_id,
+        id: doc.document_id || String(idx),
         color,
+        cue,
         message: `${doc.filename} — ${statusNote}`,
         meta: dateStr,
       }
@@ -55,14 +57,16 @@ export function ActivityFeed({ events, documents }: ActivityFeedProps) {
       {
         id: 'init-1',
         color: 'green',
-        message: 'Workspace authenticated and ready',
-        meta: 'Active',
+        cue: 'ON AIR',
+        message: 'Workspace authenticated and ready on clock',
+        meta: 'LIVE',
       },
       {
         id: 'init-2',
         color: 'purple',
-        message: 'Awaiting first document upload',
-        meta: 'Standby',
+        cue: 'STANDBY',
+        message: 'Awaiting first document ingestion',
+        meta: 'STANDBY',
       },
     ]
   }
@@ -70,10 +74,11 @@ export function ActivityFeed({ events, documents }: ActivityFeedProps) {
   return (
     <div className="card" id="activity-feed-card">
       <div className="section-header">
-        <h2 className="section-title">
-          <span className="section-title-icon">🕐</span>
-          Recent Activity
-        </h2>
+        <div>
+          <span className="mono cue-label">CUE 03 · ACTIVITY LOG</span>
+          <h2 className="section-title">System Log</h2>
+        </div>
+        <span className="dot dot-live" title="Live stream active" />
       </div>
 
       <div
@@ -84,12 +89,10 @@ export function ActivityFeed({ events, documents }: ActivityFeedProps) {
       >
         {items.map((event) => (
           <div className="activity-item" key={event.id}>
-            <div className="activity-dot-wrap">
-              <div className={`activity-dot ${event.color}`} />
-            </div>
+            <div className="activity-cue mono">{event.cue}</div>
             <div className="activity-body">
               <div className="activity-msg">{event.message}</div>
-              <div className="activity-meta">{event.meta}</div>
+              <div className="activity-meta mono t-num">{event.meta}</div>
             </div>
           </div>
         ))}

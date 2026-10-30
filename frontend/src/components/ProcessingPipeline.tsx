@@ -61,7 +61,7 @@ export function ProcessingPipeline({ currentStep }: PipelineStepsProps) {
         {steps.map((step) => (
           <div className="pipeline-step" key={step.id} id={`step-${step.id}`}>
             <div className={`step-number ${step.state}`}>
-              {step.state === 'done' ? '✓' : step.state === 'active' ? '►' : '○'}
+              {String(STEPS.findIndex((s) => s.id === step.id) + 1).padStart(2, '0')}
             </div>
             <div className="step-info">
               <div className="step-name">{step.name}</div>

@@ -1,9 +1,16 @@
 import type {
+  DocumentAnomaliesResponse,
+  DocumentDuplicatesResponse,
   DocumentInspectResponse,
   DocumentListItem,
+  DocumentTaxValidationResponse,
   DocumentTransactionsResponse,
   DocumentUploadResponse,
   ProcessDocumentResponse,
+  ReconciliationListResponse,
+  ReconciliationRequest,
+  ReconciliationResult,
+  TaxRulesResponse,
 } from '../types/api'
 import { requestJson } from './apiClient'
 
@@ -46,6 +53,12 @@ export function updateStoredDocument(
   localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(updatedDocs))
 }
 
+export function deleteStoredDocument(documentId: string): void {
+  const docs = loadDocuments()
+  const updatedDocs = docs.filter((doc) => doc.document_id !== documentId)
+  localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(updatedDocs))
+}
+
 export async function uploadDocument(
   file: File,
 ): Promise<DocumentUploadResponse> {
@@ -60,7 +73,6 @@ export async function uploadDocument(
     },
   )
 
-  // Cache in local storage for document tracking in the UI
   saveStoredDocument({
     document_id: response.document_id,
     filename: response.filename,
@@ -90,7 +102,6 @@ export async function processDocument(
     },
   )
 
-  // Update cached document record
   updateStoredDocument(documentId, {
     status: 'PROCESSED',
     transaction_count: response.saved_transactions,
@@ -107,5 +118,73 @@ export async function getDocumentTransactions(
 ): Promise<DocumentTransactionsResponse> {
   return requestJson<DocumentTransactionsResponse>(
     `/api/documents/${documentId}/transactions`,
+  )
+}
+
+// ─── Anomalies & Duplicates ────────────────────────────────────────
+
+export async function getDocumentAnomalies(
+  documentId: string,
+): Promise<DocumentAnomaliesResponse> {
+  return requestJson<DocumentAnomaliesResponse>(
+    `/api/documents/${documentId}/anomalies`,
+  )
+}
+
+export async function getDocumentDuplicates(
+  documentId: string,
+): Promise<DocumentDuplicatesResponse> {
+  return requestJson<DocumentDuplicatesResponse>(
+    `/api/documents/${documentId}/duplicates`,
+  )
+}
+
+// ─── Reconciliation ────────────────────────────────────────────────
+
+export async function runReconciliation(
+  req: ReconciliationRequest,
+): Promise<ReconciliationResult> {
+  return requestJson<ReconciliationResult>('/api/reconciliation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function listReconciliations(): Promise<ReconciliationListResponse> {
+  return requestJson<ReconciliationListResponse>('/api/reconciliation')
+}
+
+export async function getReconciliation(
+  reconciliationId: string,
+): Promise<ReconciliationResult> {
+  return requestJson<ReconciliationResult>(
+    `/api/reconciliation/${reconciliationId}`,
+  )
+}
+
+// ─── Tax Validation & Compliance ───────────────────────────────────
+
+export async function getTaxRules(): Promise<TaxRulesResponse> {
+  return requestJson<TaxRulesResponse>('/api/tax-validation/rules')
+}
+
+export async function validateDocumentTaxCompliance(
+  documentId: string,
+  payload: {
+    financial_year?: string
+    is_senior_citizen?: boolean
+    declared_income?: Record<string, number>
+    claimed_deductions?: Record<string, number>
+    tds_entries?: Array<Record<string, unknown>>
+  } = {},
+): Promise<DocumentTaxValidationResponse> {
+  return requestJson<DocumentTaxValidationResponse>(
+    `/api/tax-validation/documents/${documentId}/validate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
   )
 }
