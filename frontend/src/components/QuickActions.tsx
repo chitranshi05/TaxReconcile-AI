@@ -16,37 +16,37 @@ export function QuickActions({ onNavigate, onUpload }: QuickActionsProps) {
   const actions: QuickAction[] = [
     {
       id: 'qa-upload',
-      icon: '📤',
+      icon: '01',
       label: 'Upload Document',
       onClick: onUpload,
     },
     {
       id: 'qa-transactions',
-      icon: '💳',
+      icon: '02',
       label: 'View Transactions',
       onClick: () => onNavigate?.('transactions'),
     },
     {
       id: 'qa-reconcile',
-      icon: '🔄',
+      icon: '03',
       label: 'Run Reconciliation',
       onClick: () => onNavigate?.('reconciliation'),
     },
     {
       id: 'qa-anomalies',
-      icon: '⚠️',
+      icon: '04',
       label: 'Check Anomalies',
       onClick: () => onNavigate?.('anomalies'),
     },
     {
       id: 'qa-reports',
-      icon: '📊',
+      icon: '05',
       label: 'Generate Report',
       onClick: () => onNavigate?.('reports'),
     },
     {
       id: 'qa-settings',
-      icon: '⚙️',
+      icon: '06',
       label: 'Settings',
       onClick: () => onNavigate?.('settings'),
     },

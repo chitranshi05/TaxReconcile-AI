@@ -56,7 +56,7 @@ export function StatCards({
   return (
     <div className="stats-grid">
       <StatCard
-        icon="📄"
+        icon="01"
         iconColor="purple"
         value={documentsCount}
         label="Documents Uploaded"
@@ -69,7 +69,7 @@ export function StatCards({
         placeholder={!hasDocuments}
       />
       <StatCard
-        icon="✅"
+        icon="02"
         iconColor="green"
         value={transactionsCount.toLocaleString()}
         label="Transactions Processed"
@@ -82,7 +82,7 @@ export function StatCards({
         placeholder={transactionsCount === 0}
       />
       <StatCard
-        icon="🔍"
+        icon="03"
         iconColor="blue"
         value={anomaliesCount}
         label="Anomalies Detected"
@@ -95,7 +95,7 @@ export function StatCards({
         placeholder={anomaliesCount === 0}
       />
       <StatCard
-        icon="⚠️"
+        icon="04"
         iconColor="red"
         value={invalidRowsCount}
         label="Invalid Rows"

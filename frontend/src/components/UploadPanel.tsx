@@ -103,25 +103,25 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
 
         {isUploading ? (
           <>
-            <div className="upload-icon">⏳</div>
+            <div className="upload-icon">ON AIR</div>
             <div className="upload-title">Uploading…</div>
             <div className="upload-sub">Please wait while your file is being uploaded</div>
           </>
         ) : uploadState === 'success' ? (
           <>
-            <div className="upload-icon">✅</div>
+            <div className="upload-icon">TAKE</div>
             <div className="upload-title">Upload Successful</div>
             <div className="upload-sub" style={{ color: 'var(--accent-green)' }}>{message}</div>
           </>
         ) : uploadState === 'error' ? (
           <>
-            <div className="upload-icon">❌</div>
+            <div className="upload-icon">HOLD</div>
             <div className="upload-title">Upload Failed</div>
             <div className="upload-sub" style={{ color: 'var(--accent-red)' }}>{message}</div>
           </>
         ) : (
           <>
-            <div className="upload-icon">📂</div>
+            <div className="upload-icon">CUE 02</div>
             <div className="upload-title">Drop your file here</div>
             <div className="upload-sub">
               or click to browse — supports the following formats

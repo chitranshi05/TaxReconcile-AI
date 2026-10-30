@@ -1,5 +1,3 @@
-// DashboardPage — main overview screen wired with live documents & statistics
-
 import { useState, useEffect, useCallback } from 'react'
 import { StatCards } from '../components/StatCards'
 import { UploadPanel } from '../components/UploadPanel'
@@ -7,19 +5,28 @@ import { DocumentsTable } from '../components/DocumentsTable'
 import { ProcessingPipeline } from '../components/ProcessingPipeline'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { QuickActions } from '../components/QuickActions'
+import { PageHero } from '../components/PageHero'
 import { loadDocuments } from '../services/documents'
 import type { DocumentListItem } from '../types/api'
 
 interface DashboardPageProps {
-  onNavigate: (page: string) => void
+  onNavigate: (page: string, docId?: string) => void
   onUpload?: () => void
   onDocumentsChange?: (count: number) => void
+  hero?: {
+    line1: string
+    line2: string
+    kicker: string
+    lede: string
+    cue: string
+  }
 }
 
 export function DashboardPage({
   onNavigate,
   onUpload,
   onDocumentsChange,
+  hero,
 }: DashboardPageProps) {
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
 
@@ -33,7 +40,6 @@ export function DashboardPage({
     refreshDocuments()
   }, [refreshDocuments])
 
-  // Derive metrics from current document collection
   const documentsCount = documents.length
   const transactionsCount = documents.reduce(
     (sum, doc) => sum + (doc.transaction_count || 0),
@@ -44,16 +50,15 @@ export function DashboardPage({
     0,
   )
 
-  // Pipeline step calculation based on recent document state
   let currentStep: number | undefined = undefined
   const latestDoc = documents[0]
   if (latestDoc) {
     if (latestDoc.status === 'PROCESSED') {
-      currentStep = 3 // Review Transactions
+      currentStep = 3
     } else if (latestDoc.status === 'UPLOADED') {
-      currentStep = 1 // Inspect / Ready to process
+      currentStep = 1
     } else {
-      currentStep = 2 // Processing
+      currentStep = 2
     }
   }
 
@@ -63,27 +68,32 @@ export function DashboardPage({
 
   return (
     <>
-      {/* Row 1 – KPI cards with real metrics */}
+      <PageHero
+        kicker={hero?.kicker ?? 'Statements in, transactions out. The room stays in sync.'}
+        line1={hero?.line1 ?? 'The ledger runs'}
+        line2={hero?.line2 ?? 'on our clock.'}
+        lede={hero?.lede ?? 'We ingest files, map columns, extract the ledger and flag what does not belong — one clock for the whole workspace.'}
+        cue={hero?.cue ?? 'CUE 01 · Selected work'}
+      />
+
       <StatCards
         documentsCount={documentsCount}
         transactionsCount={transactionsCount}
         invalidRowsCount={invalidRowsCount}
       />
 
-      {/* Row 2 – Upload + Pipeline */}
       <div className="two-col">
         <UploadPanel onUploaded={handleDocumentUploaded} />
         <ProcessingPipeline currentStep={currentStep} />
       </div>
 
-      {/* Row 3 – Documents table (full width) */}
       <DocumentsTable
         documents={documents}
         onRefresh={refreshDocuments}
         onProcess={() => refreshDocuments()}
+        onNavigatePage={onNavigate}
       />
 
-      {/* Row 4 – Quick Actions + Activity Feed */}
       <div className="two-col">
         <QuickActions onNavigate={onNavigate} onUpload={onUpload} />
         <ActivityFeed documents={documents} />
