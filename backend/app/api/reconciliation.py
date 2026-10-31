@@ -1,11 +1,15 @@
 from datetime import datetime, timezone
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.database.mongodb import get_database
 from app.services.auth_dependencies import get_current_user
 from app.schemas.reconciliation import ReconciliationRequest
 from app.services.reconciliation.reconciliation_engine import reconcile_transactions
+from app.services.reconciliation.report_generator import (
+    generate_reconciliation_pdf,
+    generate_reconciliation_xlsx,
+)
 
 router = APIRouter(
     prefix="/api/reconciliation",
@@ -218,3 +222,47 @@ def get_reconciliation(
         record["created_at"] = created_at.isoformat()
 
     return record
+
+
+@router.get("/{reconciliation_id}/report", status_code=200)
+def download_reconciliation_report(
+    reconciliation_id: str,
+    format: str = "xlsx",
+    current_user: dict = Depends(get_current_user),
+):
+    """Download a saved reconciliation as an Excel or PDF report."""
+    if not ObjectId.is_valid(reconciliation_id):
+        raise HTTPException(status_code=400, detail="Invalid reconciliation_id.")
+
+    if format not in {"xlsx", "pdf"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported report format. Choose 'xlsx' or 'pdf'.",
+        )
+
+    query = {"_id": ObjectId(reconciliation_id)}
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    record = get_database().reconciliations.find_one(query)
+    if not record:
+        raise HTTPException(status_code=404, detail="Reconciliation record not found.")
+
+    if format == "pdf":
+        content = generate_reconciliation_pdf(record)
+        media_type = "application/pdf"
+    else:
+        content = generate_reconciliation_xlsx(record)
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="reconciliation-{reconciliation_id}.{format}"'
+            )
+        },
+    )

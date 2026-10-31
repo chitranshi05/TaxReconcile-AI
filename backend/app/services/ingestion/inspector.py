@@ -15,7 +15,10 @@ def inspect_file(file_path: str):
 
     if extension == ".csv":
 
-        dataframe = pd.read_csv(path)
+        try:
+            dataframe = pd.read_csv(path)
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError, OSError) as error:
+            raise ValueError(f"Unable to read CSV file: {error}") from error
 
         return [
             {
@@ -33,10 +36,14 @@ def inspect_file(file_path: str):
 
     if extension in [".xlsx", ".xls"]:
 
-        sheets = pd.read_excel(
-            path,
-            sheet_name=None
-        )
+        try:
+            sheets = pd.read_excel(
+                path,
+                sheet_name=None,
+                engine="openpyxl" if extension == ".xlsx" else None,
+            )
+        except Exception as error:
+            raise ValueError(f"Unable to read Excel workbook: {error}") from error
 
         result = []
 

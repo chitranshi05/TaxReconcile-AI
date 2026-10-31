@@ -38,6 +38,8 @@ from app.services.ingestion.column_mapper import detect_columns
 from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.inspector import inspect_file
 from app.services.ingestion.csv_processor import process_csv_file
+from app.services.ingestion.excel_processor import process_excel_file
+from app.services.ingestion.json_processor import process_json_file
 from app.services.ingestion.transaction_saver import save_valid_transactions
 from app.services.ingestion.duplicate_detector import detect_duplicates
 from app.services.ingestion.anomaly_detector import detect_anomalies
@@ -45,7 +47,7 @@ from app.services.ingestion.anomaly_detector import detect_anomalies
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_FILE_TYPES = {
@@ -362,10 +364,10 @@ def process_document(
             detail="Document not found.",
         )
 
-    if document.get("file_type") != "CSV":
+    if document.get("file_type") not in {"CSV", "XLSX", "JSON"}:
         raise HTTPException(
             status_code=400,
-            detail="Processing currently supports CSV files only.",
+            detail="Processing currently supports CSV, XLSX, and JSON files only.",
         )
 
     owner_id = document.get("owner_id")
@@ -450,10 +452,21 @@ def process_document(
                     f"processing attempt: {error}"
                 ),
             ) from error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_RETRIED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+        )
 
     file_path = UPLOAD_DIR / document["filename"]
     try:
-        result = process_csv_file(str(file_path))
+        processor = {
+            "CSV": process_csv_file,
+            "XLSX": process_excel_file,
+            "JSON": process_json_file,
+        }[document["file_type"]]
+        result = processor(str(file_path))
     except ValueError as error:
         try:
             mark_processing_failed()
@@ -465,6 +478,13 @@ def process_document(
                     f"Failed to mark document as FAILED: {status_error}"
                 ),
             ) from status_error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": str(error)},
+        )
         raise HTTPException(
             status_code=400,
             detail=str(error),
@@ -480,6 +500,13 @@ def process_document(
                     f"Failed to mark document as FAILED: {status_error}"
                 ),
             ) from status_error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": str(error)},
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process document: {error}",
@@ -530,10 +557,25 @@ def process_document(
             detail += f". Rollback of saved transactions also failed: {rollback_error}"
         if status_error is not None:
             detail += f". Failed to mark document as FAILED: {status_error}"
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": detail},
+        )
         raise HTTPException(
             status_code=500,
             detail=detail,
         ) from error
+
+    log_audit_event(
+        action="DOCUMENT_PROCESSED",
+        user_id=str(current_user["_id"]),
+        resource_type="document",
+        resource_id=document_id,
+        details={"saved_transactions": saved_count},
+    )
 
     return {
         "message": "CSV processing completed.",
