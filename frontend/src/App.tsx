@@ -16,7 +16,7 @@ import { LoginPage } from './pages/LoginPage'
 
 import { getHealth } from './services/backend'
 import { getMe, logout, isAuthenticated } from './services/auth'
-import { loadDocuments } from './services/documents'
+import { loadDocuments, fetchDocuments } from './services/documents'
 import type { HealthResponse, UserResponse } from './types/api'
 
 type PageId =
@@ -115,6 +115,9 @@ function App() {
     getMe()
       .then((userData) => {
         setUser(userData)
+        fetchDocuments()
+          .then((docs) => setDocumentsCount(docs.length))
+          .catch(() => {})
       })
       .catch(() => {
         logout()
@@ -133,6 +136,9 @@ function App() {
 
   const handleAuthSuccess = (authenticatedUser: UserResponse) => {
     setUser(authenticatedUser)
+    fetchDocuments()
+      .then((docs) => setDocumentsCount(docs.length))
+      .catch(() => {})
   }
 
   const handleLogout = () => {

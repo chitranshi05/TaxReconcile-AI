@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { processDocument, inspectDocument, deleteStoredDocument } from '../services/documents'
+import { processDocument, inspectDocument, deleteDocument } from '../services/documents'
 import type { DocumentInspectResponse, DocumentListItem, DocumentStatus } from '../types/api'
 import { DocumentInspectModal } from './DocumentInspectModal'
 
@@ -100,8 +100,8 @@ export function DocumentsTable({
     }
   }
 
-  const handleDelete = (docId: string) => {
-    deleteStoredDocument(docId)
+  const handleDelete = async (docId: string) => {
+    await deleteDocument(docId)
     onRefresh?.()
   }
 

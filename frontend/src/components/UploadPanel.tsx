@@ -20,15 +20,19 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
 
   function handleDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
+    e.stopPropagation()
     setUploadState('dragging')
   }
 
-  function handleDragLeave() {
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
     setUploadState('idle')
   }
 
   async function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
+    e.stopPropagation()
     const file = e.dataTransfer.files?.[0]
     if (file) await submitFile(file)
   }
@@ -131,7 +135,16 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
                 <span key={t} className="type-badge">{t}</span>
               ))}
             </div>
-            <button className="upload-btn" type="button" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="upload-btn"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!isUploading) {
+                  fileInputRef.current?.click()
+                }
+              }}
+            >
               Browse Files
             </button>
           </>

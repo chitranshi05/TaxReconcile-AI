@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { PageHero } from '../components/PageHero'
 import { UploadPanel } from '../components/UploadPanel'
 import { DocumentsTable } from '../components/DocumentsTable'
-import { loadDocuments } from '../services/documents'
+import { loadDocuments, fetchDocuments } from '../services/documents'
 import type { DocumentListItem } from '../types/api'
 
 interface DocumentsPageProps {
@@ -22,10 +22,10 @@ export function DocumentsPage({
   onDocumentsChange,
   hero,
 }: DocumentsPageProps) {
-  const [documents, setDocuments] = useState<DocumentListItem[]>([])
+  const [documents, setDocuments] = useState<DocumentListItem[]>(() => loadDocuments())
 
-  const refreshDocuments = useCallback(() => {
-    const list = loadDocuments()
+  const refreshDocuments = useCallback(async () => {
+    const list = await fetchDocuments()
     setDocuments(list)
     onDocumentsChange?.(list.length)
   }, [onDocumentsChange])

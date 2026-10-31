@@ -6,7 +6,7 @@ import { ProcessingPipeline } from '../components/ProcessingPipeline'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { QuickActions } from '../components/QuickActions'
 import { PageHero } from '../components/PageHero'
-import { loadDocuments } from '../services/documents'
+import { loadDocuments, fetchDocuments } from '../services/documents'
 import type { DocumentListItem } from '../types/api'
 
 interface DashboardPageProps {
@@ -28,10 +28,10 @@ export function DashboardPage({
   onDocumentsChange,
   hero,
 }: DashboardPageProps) {
-  const [documents, setDocuments] = useState<DocumentListItem[]>([])
+  const [documents, setDocuments] = useState<DocumentListItem[]>(() => loadDocuments())
 
-  const refreshDocuments = useCallback(() => {
-    const list = loadDocuments()
+  const refreshDocuments = useCallback(async () => {
+    const list = await fetchDocuments()
     setDocuments(list)
     onDocumentsChange?.(list.length)
   }, [onDocumentsChange])

@@ -59,6 +59,64 @@ export function deleteStoredDocument(documentId: string): void {
   localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(updatedDocs))
 }
 
+interface BackendDocumentMetadata {
+  id: string
+  filename: string
+  file_type: DocumentListItem['file_type']
+  document_type?: string
+  status: DocumentListItem['status']
+  owner_id?: string
+  uploaded_at?: string
+  transaction_count?: number
+}
+
+/**
+ * Fetch documents from the backend API (GET /api/documents/) and synchronise with localStorage.
+ * Falls back to local cache if offline or unauthenticated.
+ */
+export async function fetchDocuments(): Promise<DocumentListItem[]> {
+  try {
+    const remote = await requestJson<BackendDocumentMetadata[]>('/api/documents/')
+    const local = loadDocuments()
+    const localMap = new Map(local.map((d) => [d.document_id, d]))
+
+    const merged: DocumentListItem[] = remote.map((item) => {
+      const existing = localMap.get(item.id)
+      return {
+        document_id: item.id,
+        filename: item.filename,
+        file_type: item.file_type,
+        status: (item.status as DocumentListItem['status']) || 'UPLOADED',
+        uploaded_at: item.uploaded_at || existing?.uploaded_at || new Date().toISOString(),
+        transaction_count: item.transaction_count ?? existing?.transaction_count ?? 0,
+        invalid_row_count: existing?.invalid_row_count,
+        column_mapping: existing?.column_mapping,
+        processing_errors: existing?.processing_errors,
+      }
+    })
+
+    localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(merged))
+    return merged
+  } catch (error) {
+    console.warn('Could not fetch server documents, using local cache:', error)
+    return loadDocuments()
+  }
+}
+
+/**
+ * Delete a document from both backend and local storage.
+ */
+export async function deleteDocument(documentId: string): Promise<void> {
+  try {
+    await requestJson(`/api/documents/${documentId}`, {
+      method: 'DELETE',
+    })
+  } catch (err) {
+    console.warn('Backend delete document failed, removing locally:', err)
+  }
+  deleteStoredDocument(documentId)
+}
+
 export async function uploadDocument(
   file: File,
 ): Promise<DocumentUploadResponse> {
