@@ -350,3 +350,4 @@ def compute_batch_confidence(
         }
         enriched.append(item)
     return enriched
+

@@ -49,3 +49,4 @@ class BatchConfidenceResponse(BaseModel):
     confidence_distribution: dict[str, int]
     recommendations_summary: dict[str, int]
     enriched_matches: list[dict[str, Any]]
+

@@ -19,13 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pymongo import ASCENDING
 
 from app.api.auth import router as auth_router
-
 from app.api.documents import router as documents_router
 from app.config import settings
 from app.database.mongodb import client, get_database
 from app.api.reconciliation import router as reconciliation_router
 from app.api.anomalies import router as anomalies_router
 from app.api.tax_validation import router as tax_validation_router
+from app.api.explainability import router as explainability_router
 
 
 @asynccontextmanager
@@ -72,7 +72,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── CORS ───────────────────────────────────────────────────────────────────
 # Allows the React frontend dev server to make cross-origin requests.
 # In production, replace CORS_ORIGINS with the deployed frontend domain.
 app.add_middleware(
@@ -83,17 +83,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# â”€â”€ Routers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Routers ────────────────────────────────────────────────────────────────
 
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(reconciliation_router)
 app.include_router(anomalies_router)
 app.include_router(tax_validation_router)
+app.include_router(explainability_router)
 
 
-
-# â”€â”€ Root endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Root endpoints ─────────────────────────────────────────────────────────
 @app.get("/", tags=["System"])
 def root():
     return {
@@ -112,5 +112,4 @@ def health_check():
         client.admin.command("ping")
         return {"status": "healthy", "database": "connected"}
     except Exception:
-
         return {"status": "unhealthy", "database": "disconnected"}
