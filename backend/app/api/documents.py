@@ -44,6 +44,17 @@ from app.services.ingestion.transaction_saver import save_valid_transactions
 from app.services.ingestion.duplicate_detector import detect_duplicates
 from app.services.ingestion.anomaly_detector import detect_anomalies
 from app.services.ingestion.entity_normalizer import normalize_transaction_entity
+from app.services.ingestion.transaction_classifier import (
+    classify_transaction,
+    classify_transactions,
+    summarize_classification,
+)
+from app.schemas.classification import (
+    ClassifyTransactionRequest,
+    TransactionClassificationResponse,
+    ClassifyBatchRequest,
+    DocumentClassificationResponse,
+)
 from app.schemas.entity_normalization import (
     NormalizeDescriptionRequest,
     NormalizedEntityResponse,
@@ -867,4 +878,71 @@ def get_document_entities(
         "document_id": document_id,
         "transaction_count": len(normalized_entities),
         "entities": normalized_entities,
+    }
+
+
+@router.post("/classify-transaction", response_model=TransactionClassificationResponse)
+def classify_single_transaction_endpoint(
+    request: ClassifyTransactionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Categorize a transaction into financial categories, sub-categories, and statutory tax heads.
+    """
+    return classify_transaction(request.model_dump())
+
+
+@router.post("/classify-batch")
+def classify_batch_endpoint(
+    request: ClassifyBatchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Classify a batch of transactions and return enriched items alongside summary P&L and tax head metrics.
+    """
+    items = [t.model_dump() for t in request.transactions]
+    classified = classify_transactions(items)
+    summary = summarize_classification(classified)
+    return {
+        "summary": summary,
+        "classified_transactions": classified,
+    }
+
+
+@router.get("/{document_id}/classification", response_model=DocumentClassificationResponse)
+def get_document_classification(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Classify all transactions in an uploaded document and generate financial category and tax head summaries.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    for tx in transactions:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+        created_at = tx.get("created_at")
+        if created_at is not None and hasattr(created_at, "isoformat"):
+            tx["created_at"] = created_at.isoformat()
+
+    classified = classify_transactions(transactions)
+    summary = summarize_classification(classified)
+
+    return {
+        "document_id": document_id,
+        "summary": summary,
+        "classified_transactions": classified,
     }

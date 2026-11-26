@@ -89,3 +89,4 @@ def test_get_document_entities_not_found(client: TestClient, auth_headers: dict)
     missing_id = str(ObjectId())
     response = client.get(f"/api/documents/{missing_id}/entities", headers=auth_headers)
     assert response.status_code == 404
+

@@ -19,3 +19,4 @@ class DocumentEntitiesResponse(BaseModel):
     document_id: str
     transaction_count: int
     entities: list[NormalizedEntityResponse]
+

@@ -11,6 +11,14 @@ from app.services.ingestion.entity_normalizer import (
     normalize_transaction_entity,
     extract_clean_entity,
 )
+from app.services.ingestion.transaction_classifier import (
+    TransactionClassifier,
+    TransactionCategory,
+    TaxHead,
+    classify_transaction,
+    classify_transactions,
+    summarize_classification,
+)
 
 __all__ = [
     "AnomalyDetector",
@@ -19,4 +27,10 @@ __all__ = [
     "EntityNormalizer",
     "normalize_transaction_entity",
     "extract_clean_entity",
+    "TransactionClassifier",
+    "TransactionCategory",
+    "TaxHead",
+    "classify_transaction",
+    "classify_transactions",
+    "summarize_classification",
 ]
