@@ -5,7 +5,17 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from app.database.mongodb import get_database
 from app.services.auth_dependencies import get_current_user
 from app.schemas.reconciliation import ReconciliationRequest
+from app.schemas.confidence import (
+    MatchConfidenceEvaluationRequest,
+    MatchConfidenceResponse,
+    BatchConfidenceEvaluationRequest,
+    BatchConfidenceResponse,
+)
 from app.services.reconciliation.reconciliation_engine import reconcile_transactions
+from app.services.reconciliation.confidence_scorer import (
+    ConfidenceScorer,
+    compute_batch_confidence,
+)
 from app.services.reconciliation.report_generator import (
     generate_reconciliation_pdf,
     generate_reconciliation_xlsx,
@@ -171,6 +181,66 @@ def run_reconciliation(
         "matches": result["matches"],
         "bank_only": result["bank_only"],
         "ledger_only": result["ledger_only"],
+    }
+
+
+@router.post("/confidence-score", status_code=200, response_model=MatchConfidenceResponse)
+def evaluate_single_match_confidence(
+    request: MatchConfidenceEvaluationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Evaluate multi-factor confidence score for a candidate transaction match.
+    Computes component scores for amount agreement, date proximity, description similarity,
+    and uniqueness/ambiguity.
+    """
+    scorer = ConfidenceScorer(
+        date_tolerance_days=request.date_tolerance_days,
+        amount_tolerance=request.amount_tolerance,
+    )
+    return scorer.score_match(
+        bank_tx=request.bank_transaction,
+        ledger_tx=request.ledger_transaction,
+        match_type=request.match_type,
+        similarity_score=request.similarity_score,
+        date_difference_days=request.date_difference_days,
+        amount_variance=request.amount_variance,
+        candidate_count=request.candidate_count,
+        second_best_similarity=request.second_best_similarity,
+    )
+
+
+@router.post("/batch-confidence-score", status_code=200, response_model=BatchConfidenceResponse)
+def evaluate_batch_confidence(
+    request: BatchConfidenceEvaluationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Enrich an entire set of matches with calibrated confidence scores, tiers,
+    and automated workflow recommendations.
+    """
+    enriched = compute_batch_confidence(
+        matches=request.matches,
+        date_tolerance_days=request.date_tolerance_days,
+        amount_tolerance=request.amount_tolerance,
+    )
+    total = len(enriched)
+    avg_conf = round(sum(m["confidence_score"] for m in enriched) / total, 2) if total > 0 else 0.0
+
+    conf_dist: dict[str, int] = {}
+    rec_dist: dict[str, int] = {}
+    for m in enriched:
+        lvl = m.get("confidence_level", "UNKNOWN")
+        rec = m.get("decision_recommendation", "UNKNOWN")
+        conf_dist[lvl] = conf_dist.get(lvl, 0) + 1
+        rec_dist[rec] = rec_dist.get(rec, 0) + 1
+
+    return {
+        "total_evaluated": total,
+        "average_confidence": avg_conf,
+        "confidence_distribution": conf_dist,
+        "recommendations_summary": rec_dist,
+        "enriched_matches": enriched,
     }
 
 

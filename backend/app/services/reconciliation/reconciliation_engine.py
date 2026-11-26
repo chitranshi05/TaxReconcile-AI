@@ -1,3 +1,4 @@
+from app.services.reconciliation.confidence_scorer import ConfidenceScorer
 from datetime import date, datetime
 import re
 from typing import Any
@@ -502,6 +503,30 @@ class ReconciliationEngine:
                 l_clean["status"] = "LEDGER_ONLY"
                 l_clean["notes"] = "Transaction appears in ledger with no corresponding bank statement entry."
                 ledger_only.append(l_clean)
+
+        # Enrich matches with multi-factor confidence scoring
+        scorer = ConfidenceScorer(
+            date_tolerance_days=self.date_tolerance_days,
+            amount_tolerance=self.amount_tolerance,
+        )
+        for m in matches:
+            evaluation = scorer.score_match(
+                bank_tx=m.get("bank_transaction", {}),
+                ledger_tx=m.get("ledger_transaction", {}),
+                match_type=m.get("match_type", "EXACT_MATCH"),
+                similarity_score=m.get("similarity_score"),
+                date_difference_days=m.get("date_difference_days", 0),
+                amount_variance=m.get("amount_variance", 0.0),
+            )
+            if "confidence_score" not in m:
+                m["confidence_score"] = evaluation["confidence_score"]
+            m["confidence_level"] = evaluation["confidence_level"]
+            m["decision_recommendation"] = evaluation["decision_recommendation"]
+            m["confidence_breakdown"] = evaluation["components"]
+            m["confidence_factors"] = {
+                "positive": evaluation["positive_factors"],
+                "negative": evaluation["negative_factors"],
+            }
 
         # Summary calculations
         matched_count = sum(1 for m in matches if m["status"] == "MATCHED")
