@@ -26,6 +26,7 @@ from app.api.reconciliation import router as reconciliation_router
 from app.api.anomalies import router as anomalies_router
 from app.api.tax_validation import router as tax_validation_router
 from app.api.explainability import router as explainability_router
+from app.api.findings import router as findings_router
 
 
 @asynccontextmanager
@@ -91,6 +92,7 @@ app.include_router(reconciliation_router)
 app.include_router(anomalies_router)
 app.include_router(tax_validation_router)
 app.include_router(explainability_router)
+app.include_router(findings_router)
 
 
 # ── Root endpoints ─────────────────────────────────────────────────────────

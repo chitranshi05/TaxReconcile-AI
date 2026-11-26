@@ -104,3 +104,4 @@ class BatchExplainResponse(BaseModel):
     summary_by_status: dict[str, int]
     summary_by_risk: dict[str, int]
     explanations: list[TransactionExplanationResponse]
+
