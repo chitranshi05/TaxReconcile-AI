@@ -505,3 +505,4 @@ def run_isolation_forest(
         min_samples=min_samples,
     )
     return detector.detect(transactions)
+

@@ -77,3 +77,4 @@ class IsolationForestResponse(BaseModel):
     all_scored: list[dict[str, Any]]
     notes: list[str]
     disclaimer: str
+

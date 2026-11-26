@@ -306,3 +306,4 @@ class TestRunIsolationForest:
                 tx.get("amount") for tx in result["anomalies"]
             ]
             assert 9_999_999.0 in flagged_amounts
+
