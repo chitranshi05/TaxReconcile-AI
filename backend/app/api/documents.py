@@ -43,6 +43,12 @@ from app.services.ingestion.json_processor import process_json_file
 from app.services.ingestion.transaction_saver import save_valid_transactions
 from app.services.ingestion.duplicate_detector import detect_duplicates
 from app.services.ingestion.anomaly_detector import detect_anomalies
+from app.services.ingestion.entity_normalizer import normalize_transaction_entity
+from app.schemas.entity_normalization import (
+    NormalizeDescriptionRequest,
+    NormalizedEntityResponse,
+    DocumentEntitiesResponse,
+)
 
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
@@ -815,4 +821,50 @@ def get_document_anomalies(
         "flagged_transactions": result["flagged_transactions"],
         "notes": result["notes"],
         "disclaimer": result["disclaimer"],
+    }
+
+
+@router.post("/normalize-description", response_model=NormalizedEntityResponse)
+def normalize_description_endpoint(
+    request: NormalizeDescriptionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Normalize an ad-hoc transaction description.
+    Strips banking gateway prefixes, reference numbers, card masks, and VPA handles,
+    detects payment channel, and maps to canonical counterparty/merchant entities.
+    """
+    return normalize_transaction_entity(request.description)
+
+
+@router.get("/{document_id}/entities", response_model=DocumentEntitiesResponse)
+def get_document_entities(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Extract and normalize counterparty entities for all transactions in an uploaded document.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"description": 1, "_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    normalized_entities = [
+        normalize_transaction_entity(tx.get("description", ""))
+        for tx in transactions
+    ]
+
+    return {
+        "document_id": document_id,
+        "transaction_count": len(normalized_entities),
+        "entities": normalized_entities,
     }
