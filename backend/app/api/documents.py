@@ -76,6 +76,14 @@ from app.schemas.semantic_matching import (
 )
 
 
+from app.services.analysis.missing_income_detector import detect_missing_income
+from app.schemas.missing_income import (
+    MissingIncomeRequest,
+    MissingIncomeResponse,
+    DocumentMissingIncomeResponse,
+)
+
+
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
 UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
@@ -1011,4 +1019,64 @@ def compare_semantic_batch_endpoint(
         matches_count=matches_count,
         results=candidates_list,
     )
+
+@router.post("/detect-missing-income", response_model=MissingIncomeResponse)
+def detect_missing_income_endpoint(
+    request: MissingIncomeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Analyze a batch of transactions to identify missing periodic income,
+    underpayment drops, and uncollected accrued income.
+    """
+    result = detect_missing_income(
+        bank_transactions=request.transactions,
+        ledger_transactions=request.ledger_transactions,
+        as_of_date=request.as_of_date,
+        underpayment_ratio_threshold=request.underpayment_ratio_threshold,
+        uncollected_tolerance_days=request.uncollected_tolerance_days,
+    )
+    return result
+
+
+@router.get("/{document_id}/missing-income", response_model=DocumentMissingIncomeResponse)
+def get_document_missing_income_endpoint(
+    document_id: str,
+    as_of_date: str | None = None,
+    underpayment_ratio_threshold: float = 0.70,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Detect recurring income streams and missing income gaps in an uploaded bank document.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    for tx in transactions:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+
+    result = detect_missing_income(
+        bank_transactions=transactions,
+        as_of_date=as_of_date,
+        underpayment_ratio_threshold=underpayment_ratio_threshold,
+    )
+
+    return {
+        "document_id": document_id,
+        "summary": result["summary"],
+        "recurring_streams": result["recurring_streams"],
+        "findings": result["findings"],
+    }
 

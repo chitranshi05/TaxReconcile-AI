@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends
 from app.services.auth_dependencies import get_current_user
 from app.schemas.anomaly import AnomalyDetectionRequest
+from app.schemas.isolation_forest import IsolationForestRequest, IsolationForestResponse
 from app.services.ingestion.anomaly_detector import detect_anomalies
+from app.services.ingestion.isolation_forest_detector import run_isolation_forest
 
 router = APIRouter(
     prefix="/api/anomalies",
@@ -42,3 +44,39 @@ def analyze_transaction_anomalies(
             tx["created_at"] = created_at.isoformat()
 
     return result
+
+
+@router.post("/ml-detect", status_code=200, response_model=IsolationForestResponse)
+def analyze_isolation_forest(
+    request: IsolationForestRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Unsupervised ML anomaly detection using Isolation Forest.
+
+    Detects multivariate outliers across the following feature dimensions:
+    - Absolute transaction amount (log-scaled)
+    - Day of month and day of week
+    - Round-number amount indicator
+    - Daily transaction frequency
+    - Debit vs. credit direction
+    - Z-score of amount within the dataset
+
+    **contamination** controls what fraction of transactions are expected to
+    be anomalous. Start at 0.05 (5 %) and adjust based on your dataset.
+
+    Returns each transaction enriched with:
+    - `is_ml_anomaly` – boolean flag
+    - `ml_anomaly_score` – normalized [0, 1] score (higher = more unusual)
+    - `ml_severity` – HIGH / MEDIUM / LOW / NORMAL
+    - `ml_reason` – human-readable explanation
+
+    Requires at least `min_samples` transactions to train the model.
+    """
+    return run_isolation_forest(
+        transactions=request.transactions,
+        contamination=request.contamination,
+        n_estimators=request.n_estimators,
+        random_state=request.random_state,
+        min_samples=request.min_samples,
+    )

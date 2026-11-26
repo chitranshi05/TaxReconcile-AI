@@ -51,3 +51,4 @@ class SemanticBatchCompareResponse(BaseModel):
     candidates_count: int
     matches_count: int
     results: list[SemanticCompareCandidate]
+
