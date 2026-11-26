@@ -19,6 +19,7 @@ from app.services.reconciliation.reconciliation_engine import (
     normalize_date_to_date,
     normalize_description,
     descriptions_match,
+    compute_description_similarity,
     extract_amount,
     extract_absolute_amount,
 )
@@ -636,6 +637,148 @@ class TestEdgeCases(unittest.TestCase):
         """Negative amount_tolerance is clamped to 0.0 safely."""
         engine = ReconciliationEngine(amount_tolerance=-100.0)
         self.assertEqual(engine.amount_tolerance, 0.0)
+
+
+
+# ===========================================================================
+# 8. Feature 4: Fuzzy Transaction Matching
+# ===========================================================================
+class TestFuzzyDescriptionMatching(unittest.TestCase):
+    """Unit tests for Pass 2 Fuzzy Description Matching and similarity scoring."""
+
+    def test_similarity_identical_descriptions(self):
+        """Identical descriptions yield 100.0% similarity."""
+        score = compute_description_similarity("Amazon Payments India", "amazon payments india")
+        self.assertEqual(score, 100.0)
+
+    def test_similarity_empty_descriptions(self):
+        """Both empty yields 100.0, one empty yields 0.0."""
+        self.assertEqual(compute_description_similarity("", ""), 100.0)
+        self.assertEqual(compute_description_similarity(None, None), 100.0)
+        self.assertEqual(compute_description_similarity("Amazon", ""), 0.0)
+        self.assertEqual(compute_description_similarity("", "Amazon"), 0.0)
+
+    def test_similarity_reordered_tokens(self):
+        """Token sort handles reordered words (AMAZON PAYMENTS INDIA vs INDIA AMAZON PAYMENTS)."""
+        score = compute_description_similarity("AMAZON PAYMENTS INDIA", "INDIA AMAZON PAYMENTS")
+        self.assertAlmostEqual(score, 100.0, places=1)
+
+    def test_similarity_minor_abbreviations_and_typos(self):
+        """Common corporate variations yield high similarity scores (>= 75%)."""
+        self.assertGreaterEqual(compute_description_similarity("SWIGGY LTD", "SWIGGY LIMITED"), 75.0)
+        self.assertGreaterEqual(compute_description_similarity("AMAZON PAYMENTS INDIA", "AMAZON PAYMENT IND"), 75.0)
+        self.assertGreaterEqual(compute_description_similarity("UBER TRIP 12345", "UBER TRIP"), 75.0)
+
+    def test_similarity_unrelated_descriptions(self):
+        """Completely different descriptions score well below 75%."""
+        score = compute_description_similarity("Wire Transfer Incoming", "Client Remittance")
+        self.assertLess(score, 50.0)
+
+    def test_fuzzy_match_amazon_example(self):
+        """AMAZON PAYMENTS INDIA vs AMAZON PAYMENT IND matches with status POTENTIAL_MATCH."""
+        bank = [tx("2026-05-15", "AMAZON PAYMENTS INDIA", amount=2499.0)]
+        ledger = [tx("2026-05-15", "AMAZON PAYMENT IND", amount=2499.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        self.assertEqual(result["summary"]["matched_count"], 0)
+
+        match = result["matches"][0]
+        self.assertEqual(match["status"], "POTENTIAL_MATCH")
+        self.assertEqual(match["match_type"], "FUZZY_MATCH")
+        self.assertGreaterEqual(match["confidence_score"], 0.75)
+        self.assertGreaterEqual(match["similarity_score"], 75.0)
+        self.assertEqual(match["date_difference_days"], 0)
+        self.assertEqual(match["amount_variance"], 0.0)
+        self.assertIn("Fuzzy description match with similarity", match["notes"])
+
+    def test_fuzzy_match_swiggy_example(self):
+        """SWIGGY LTD vs SWIGGY LIMITED resolves as POTENTIAL_MATCH under FUZZY_MATCH."""
+        bank = [tx("2026-05-18", "SWIGGY LTD", amount=540.0)]
+        ledger = [tx("2026-05-18", "SWIGGY LIMITED", amount=540.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        match = result["matches"][0]
+        self.assertEqual(match["status"], "POTENTIAL_MATCH")
+        self.assertEqual(match["match_type"], "FUZZY_MATCH")
+        self.assertAlmostEqual(match["confidence_score"], 0.83, places=2)
+
+    def test_fuzzy_match_reordered_tokens_above_threshold(self):
+        """Reordered description where token overlap < 0.4 still matches via token sort fuzzy pass."""
+        bank = [tx("2026-05-20", "AMAZON PAYMENTS CO SERVICES PVT INDIA", amount=3500.0)]
+        ledger = [tx("2026-05-20", "INDIA AMAZON PAYMENT CORP SERVICES ENTERPRISES", amount=3500.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "FUZZY_MATCH")
+        self.assertGreaterEqual(match["confidence_score"], 0.75)
+
+    def test_unrelated_descriptions_fall_through_to_amount_and_date(self):
+        """Descriptions with similarity below 75% fall through to Pass 3 (AMOUNT_AND_DATE_MATCH)."""
+        bank = [tx("2026-05-12", "Wire Transfer Incoming", amount=50000.0)]
+        ledger = [tx("2026-05-12", "Client Remittance", amount=50000.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["matched_count"], 1)
+        self.assertEqual(result["summary"]["potential_match_count"], 0)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "AMOUNT_AND_DATE_MATCH")
+        self.assertEqual(match["confidence_score"], 0.9)
+
+    def test_custom_fuzzy_threshold_respected(self):
+        """Raising fuzzy_threshold to 90 excludes an 83% candidate from fuzzy match."""
+        bank = [tx("2026-05-18", "SWIGGY LTD", amount=540.0)]
+        ledger = [tx("2026-05-18", "SWIGGY LIMITED", amount=540.0)]
+
+        result = reconcile_transactions(bank, ledger, fuzzy_threshold=90.0)
+        self.assertEqual(result["summary"]["matched_count"], 1)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "AMOUNT_AND_DATE_MATCH")
+
+    def test_best_candidate_selected_when_distinguishable(self):
+        """When multiple ledger candidates qualify, the one with highest similarity is selected."""
+        bank = [tx("2026-05-22", "ZOMATO DELIVERY CHARGES", amount=700.0)]
+        ledger = [
+            tx("2026-05-22", "ZOMATO DELIV ORDER", amount=700.0),
+            tx("2026-05-22", "ZOMATO DELIV CHARG", amount=700.0),
+        ]
+
+        result = reconcile_transactions(bank, ledger, fuzzy_threshold=70.0)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        self.assertEqual(result["summary"]["ledger_only_count"], 1)
+        match = result["matches"][0]
+        self.assertEqual(match["ledger_transaction"]["description"], "ZOMATO DELIV CHARG")
+        self.assertNotIn("multiple candidate", match["notes"])
+
+    def test_ambiguous_candidates_flagged_for_review(self):
+        """When multiple candidates have close similarity (< 5.0 gap), ambiguity is explicitly noted."""
+        bank = [tx("2026-05-25", "ZOMATO DELIVERY CHARGES", amount=700.0)]
+        ledger = [
+            tx("2026-05-25", "ZOMATO DELIV CHARG", amount=700.0),
+            tx("2026-05-25", "ZOMATO DELIV CHRG", amount=700.0),
+        ]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        match = result["matches"][0]
+        self.assertIn("multiple candidate ledger entries detected with close similarity", match["notes"])
+    def test_date_difference_excluded_from_fuzzy_pass(self):
+        """Fuzzy matching is strictly exact-date; differing dates are not matched in fuzzy pass."""
+        bank = [tx("2026-05-15", "AMAZON PAYMENTS INDIA", amount=2499.0)]
+        ledger = [tx("2026-05-16", "AMAZON PAYMENT IND", amount=2499.0)]
+
+        # Date tolerance = 0 -> date difference prevents match
+        result = reconcile_transactions(bank, ledger, date_tolerance_days=0)
+        self.assertEqual(result["summary"]["potential_match_count"], 0)
+        self.assertEqual(result["summary"]["bank_only_count"], 1)
+        self.assertEqual(result["summary"]["ledger_only_count"], 1)
+
+        # Date tolerance = 1 -> matched via Pass 4 DATE_TOLERANCE_MATCH
+        result_tol = reconcile_transactions(bank, ledger, date_tolerance_days=1)
+        self.assertEqual(result_tol["summary"]["potential_match_count"], 1)
+        self.assertEqual(result_tol["matches"][0]["match_type"], "DATE_TOLERANCE_MATCH")
 
 
 if __name__ == "__main__":

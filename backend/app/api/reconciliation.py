@@ -131,6 +131,7 @@ def run_reconciliation(
         ledger_transactions=ledger_transactions,
         date_tolerance_days=request.date_tolerance_days,
         amount_tolerance=request.amount_tolerance,
+        fuzzy_threshold=request.fuzzy_threshold,
     )
 
     # Serialize datetimes for JSON & storage
