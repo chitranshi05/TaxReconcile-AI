@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 from bson import ObjectId
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from app.services.audit_service import log_audit_event
 
 from app.config import settings
@@ -34,6 +34,7 @@ from app.database.mongodb import get_database
 from app.models.document import create_document
 from app.schemas.document import DocumentMetadataResponse
 from app.services.auth_dependencies import get_current_user
+from app.services.processing_pipeline import run_document_pipeline
 from app.services.ingestion.column_mapper import detect_columns
 from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.inspector import inspect_file
@@ -130,10 +131,11 @@ def _get_owned_document(document_id: str, current_user: dict) -> dict:
 
 @router.post("/upload", status_code=201)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
-    """Upload a financial document and persist its metadata."""
+    """Upload a financial document and queue it for automated pipeline processing."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected.")
 
@@ -210,12 +212,25 @@ async def upload_document(
     finally:
         await file.close()
 
+    document_id = str(result.inserted_id)
+    owner_id = str(current_user["_id"])
+
+    # Mark pipeline QUEUED and start background processing
+    if file_type in {"CSV", "XLSX", "JSON"}:
+        get_database().documents.update_one(
+            {"_id": result.inserted_id},
+            {"$set": {"pipeline_status": "QUEUED",
+                      "pipeline_status_updated_at": datetime.now(timezone.utc)}},
+        )
+        background_tasks.add_task(run_document_pipeline, document_id, owner_id)
+
     return {
-        "message": "Document uploaded successfully.",
-        "document_id": str(result.inserted_id),
+        "message": "Document uploaded. Processing started in the background.",
+        "document_id": document_id,
         "filename": safe_name,
         "file_type": file_type,
         "status": document["status"],
+        "pipeline_status": "QUEUED" if file_type in {"CSV", "XLSX", "JSON"} else "N/A",
     }
 
 

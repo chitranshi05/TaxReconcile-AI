@@ -47,7 +47,7 @@ def _create_indexes() -> None:
     db["users"].create_index(
         [("email", ASCENDING)],
         unique=True,
-        name="users_email_unique",
+        name="email_1",
     )
 
     db["documents"].create_index(
