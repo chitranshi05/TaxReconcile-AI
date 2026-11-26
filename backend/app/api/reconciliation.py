@@ -132,6 +132,7 @@ def run_reconciliation(
         date_tolerance_days=request.date_tolerance_days,
         amount_tolerance=request.amount_tolerance,
         fuzzy_threshold=request.fuzzy_threshold,
+        semantic_threshold=request.semantic_threshold,
     )
 
     # Serialize datetimes for JSON & storage
@@ -148,6 +149,8 @@ def run_reconciliation(
         "ledger_filename": ledger_doc.get("filename"),
         "date_tolerance_days": request.date_tolerance_days,
         "amount_tolerance": request.amount_tolerance,
+        "fuzzy_threshold": request.fuzzy_threshold,
+        "semantic_threshold": request.semantic_threshold,
         "summary": result["summary"],
         "matches": result["matches"],
         "bank_only": result["bank_only"],

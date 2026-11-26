@@ -62,6 +62,20 @@ from app.schemas.entity_normalization import (
 )
 
 
+from app.services.reconciliation.semantic_matcher import (
+    SemanticMatcher,
+    compute_semantic_similarity,
+    get_shared_concepts,
+)
+from app.schemas.semantic_matching import (
+    SemanticSimilarityRequest,
+    SemanticSimilarityResponse,
+    SemanticBatchCompareRequest,
+    SemanticBatchCompareResponse,
+    SemanticCompareCandidate,
+)
+
+
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
 UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
@@ -946,3 +960,55 @@ def get_document_classification(
         "summary": summary,
         "classified_transactions": classified,
     }
+
+@router.post("/semantic-similarity", response_model=SemanticSimilarityResponse)
+def compute_semantic_similarity_endpoint(
+    request: SemanticSimilarityRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Compute domain-aware semantic similarity score between two transaction descriptions.
+    """
+    matcher = SemanticMatcher(semantic_threshold=request.semantic_threshold)
+    score = matcher.compute_similarity(request.text1, request.text2)
+    concepts = matcher.extract_matched_concepts(request.text1, request.text2)
+    return SemanticSimilarityResponse(
+        text1=request.text1,
+        text2=request.text2,
+        similarity_score=score,
+        is_match=score >= request.semantic_threshold,
+        matched_concepts=concepts,
+        method="TF-IDF + Domain Synonyms",
+    )
+
+
+@router.post("/semantic-compare", response_model=SemanticBatchCompareResponse)
+def compare_semantic_batch_endpoint(
+    request: SemanticBatchCompareRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Compare a reference transaction narration against a list of candidate narrations
+    and rank by semantic similarity.
+    """
+    matcher = SemanticMatcher(semantic_threshold=request.semantic_threshold)
+    raw_results = matcher.compare_pairwise(request.reference_text, request.candidates)
+    matches_count = sum(1 for r in raw_results if r["is_match"])
+
+    candidates_list = [
+        SemanticCompareCandidate(
+            candidate=r["candidate"],
+            similarity_score=r["similarity_score"],
+            is_match=r["is_match"],
+            matched_concepts=r["matched_concepts"],
+        )
+        for r in raw_results
+    ]
+
+    return SemanticBatchCompareResponse(
+        reference_text=request.reference_text,
+        candidates_count=len(request.candidates),
+        matches_count=matches_count,
+        results=candidates_list,
+    )
+

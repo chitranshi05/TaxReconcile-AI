@@ -43,3 +43,4 @@ class DocumentClassificationResponse(BaseModel):
     document_id: str
     summary: ClassificationSummaryResponse
     classified_transactions: list[dict[str, Any]]
+

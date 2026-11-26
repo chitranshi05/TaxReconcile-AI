@@ -98,3 +98,4 @@ def test_get_document_classification_success(client: TestClient, auth_headers: d
     assert data["summary"]["total_transactions"] == 2
     assert data["summary"]["total_income"] == 100000.0
     assert data["summary"]["total_deductible_expense"] == 2000.0
+

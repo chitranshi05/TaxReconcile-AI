@@ -3,6 +3,11 @@ import re
 from typing import Any
 import pandas as pd
 
+from app.services.reconciliation.semantic_matcher import (
+    compute_semantic_similarity,
+    get_shared_concepts,
+)
+
 try:
     from rapidfuzz import fuzz
     _HAS_RAPIDFUZZ = True
@@ -174,10 +179,12 @@ class ReconciliationEngine:
         date_tolerance_days: int = 1,
         amount_tolerance: float = 0.0,
         fuzzy_threshold: float = 75.0,
+        semantic_threshold: float = 70.0,
     ):
         self.date_tolerance_days = max(0, int(date_tolerance_days))
         self.amount_tolerance = max(0.0, float(amount_tolerance))
         self.fuzzy_threshold = max(0.0, min(100.0, float(fuzzy_threshold)))
+        self.semantic_threshold = max(0.0, min(100.0, float(semantic_threshold)))
 
     def reconcile(
         self,
@@ -308,7 +315,65 @@ class ReconciliationEngine:
                     "notes": notes,
                 })
 
-        # Pass 3: Amount and Date Match (regardless of description differences)
+        # Pass 3: Semantic Description Match (Same date, matching amount, semantic similarity >= semantic_threshold)
+        # Identifies transactions with different wording but equivalent accounting/business meaning
+        for b_idx, b_tx in enumerate(bank_items):
+            if b_idx in matched_bank_indices:
+                continue
+            if b_tx["_norm_date"] is None or b_tx["_norm_amt"] is None:
+                continue
+
+            candidates = []
+            for l_idx, l_tx in enumerate(ledger_items):
+                if l_idx in matched_ledger_indices:
+                    continue
+                if l_tx["_norm_date"] is None or l_tx["_norm_amt"] is None:
+                    continue
+
+                if b_tx["_norm_date"] == l_tx["_norm_date"]:
+                    if _amounts_match(b_tx["_norm_amt"], l_tx["_norm_amt"], b_tx["_abs_amt"], l_tx["_abs_amt"]):
+                        sem_score = compute_semantic_similarity(b_tx["_norm_desc"], l_tx["_norm_desc"])
+                        if sem_score >= self.semantic_threshold:
+                            candidates.append((sem_score, l_idx))
+
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                best_sim, best_l_idx = candidates[0]
+
+                shared_concepts = get_shared_concepts(b_tx["_norm_desc"], ledger_items[best_l_idx]["_norm_desc"])
+                concept_str = f" [Concept: {', '.join(shared_concepts)}]" if shared_concepts else ""
+
+                ambiguity_note = ""
+                if len(candidates) > 1:
+                    second_sim, _ = candidates[1]
+                    if (best_sim - second_sim) < 5.0:
+                        ambiguity_note = (
+                            f" Note: multiple candidate ledger entries detected with close semantic similarity "
+                            f"({round(best_sim, 1)}% vs {round(second_sim, 1)}%)."
+                        )
+
+                matched_bank_indices.add(b_idx)
+                matched_ledger_indices.add(best_l_idx)
+                confidence = round(best_sim / 100.0, 2)
+                notes = (
+                    f"Semantic description match with similarity {round(best_sim, 1)}% "
+                    f"(threshold {self.semantic_threshold}%){concept_str}.{ambiguity_note} Flagged for review."
+                )
+
+                matches.append({
+                    "status": "POTENTIAL_MATCH",
+                    "match_type": "SEMANTIC_MATCH",
+                    "bank_transaction": self._clean_internal_keys(b_tx),
+                    "ledger_transaction": self._clean_internal_keys(ledger_items[best_l_idx]),
+                    "amount_variance": round(abs(b_tx["_abs_amt"] - ledger_items[best_l_idx]["_abs_amt"]), 2),
+                    "date_difference_days": 0,
+                    "confidence_score": confidence,
+                    "similarity_score": round(best_sim, 2),
+                    "matched_concepts": shared_concepts,
+                    "notes": notes,
+                })
+
+        # Pass 4: Amount and Date Match (regardless of description differences)
         for b_idx, b_tx in enumerate(bank_items):
             if b_idx in matched_bank_indices:
                 continue
@@ -341,7 +406,7 @@ class ReconciliationEngine:
                     "notes": "Exact match on date and amount with differing descriptions.",
                 })
 
-        # Pass 4: Date tolerance matches (Potential match when dates differ within tolerance)
+        # Pass 5: Date tolerance matches (Potential match when dates differ within tolerance)
         if self.date_tolerance_days > 0:
             for b_idx, b_tx in enumerate(bank_items):
                 if b_idx in matched_bank_indices:
@@ -382,7 +447,7 @@ class ReconciliationEngine:
                         ),
                     })
 
-        # Pass 5: Amount Mismatch (Same date and matching description, but differing amounts)
+        # Pass 6: Amount Mismatch (Same date and matching description, but differing amounts)
         for b_idx, b_tx in enumerate(bank_items):
             if b_idx in matched_bank_indices:
                 continue
@@ -492,11 +557,13 @@ def reconcile_transactions(
     date_tolerance_days: int = 1,
     amount_tolerance: float = 0.0,
     fuzzy_threshold: float = 75.0,
+    semantic_threshold: float = 70.0,
 ) -> dict:
     """Convenience helper to reconcile bank and ledger transactions."""
     engine = ReconciliationEngine(
         date_tolerance_days=date_tolerance_days,
         amount_tolerance=amount_tolerance,
         fuzzy_threshold=fuzzy_threshold,
+        semantic_threshold=semantic_threshold,
     )
     return engine.reconcile(bank_transactions, ledger_transactions)

@@ -780,6 +780,62 @@ class TestFuzzyDescriptionMatching(unittest.TestCase):
         self.assertEqual(result_tol["summary"]["potential_match_count"], 1)
         self.assertEqual(result_tol["matches"][0]["match_type"], "DATE_TOLERANCE_MATCH")
 
+# ===========================================================================
+# Feature 9: Semantic Description Matching (Pass 3)
+# ===========================================================================
+class TestSemanticDescriptionMatching(unittest.TestCase):
+
+    def test_semantic_description_match_identified(self):
+        """Different wording with same business meaning matches via SEMANTIC_MATCH."""
+        bank = [tx("2026-05-15", "Office premises lease rental", amount=45000.0)]
+        ledger = [tx("2026-05-15", "Rent payment property", amount=45000.0)]
+
+        result = reconcile_transactions(bank, ledger, semantic_threshold=70.0)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        self.assertEqual(len(result["matches"]), 1)
+
+        match = result["matches"][0]
+        self.assertEqual(match["status"], "POTENTIAL_MATCH")
+        self.assertEqual(match["match_type"], "SEMANTIC_MATCH")
+        self.assertGreaterEqual(match["confidence_score"], 0.70)
+        self.assertIn("similarity_score", match)
+        self.assertIn("matched_concepts", match)
+        self.assertIn("Rent", match["matched_concepts"])
+        self.assertIn("Semantic description match", match["notes"])
+
+    def test_salary_payroll_semantic_match(self):
+        """Payroll wages vs salary disbursement matches via SEMANTIC_MATCH."""
+        bank = [tx("2026-05-01", "Staff payroll wages credit", amount=75000.0)]
+        ledger = [tx("2026-05-01", "Employee salary disbursement May", amount=75000.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        self.assertEqual(result["summary"]["potential_match_count"], 1)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "SEMANTIC_MATCH")
+        self.assertIn("Salary", match["matched_concepts"])
+
+    def test_unrelated_descriptions_fall_through_to_amount_date(self):
+        """Unrelated descriptions with same date/amount fall through to AMOUNT_AND_DATE_MATCH."""
+        bank = [tx("2026-05-10", "Amazon shopping electronics", amount=1200.0)]
+        ledger = [tx("2026-05-10", "Zomato food delivery", amount=1200.0)]
+
+        result = reconcile_transactions(bank, ledger)
+        # Should NOT be SEMANTIC_MATCH; should fall through to Pass 4 AMOUNT_AND_DATE_MATCH
+        self.assertEqual(len(result["matches"]), 1)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "AMOUNT_AND_DATE_MATCH")
+
+    def test_semantic_threshold_respected(self):
+        """Setting strict threshold (> score) prevents semantic match and falls through."""
+        bank = [tx("2026-05-15", "Office premises lease rental", amount=45000.0)]
+        ledger = [tx("2026-05-15", "Rent payment property", amount=45000.0)]
+
+        # Strict 95% threshold prevents semantic match
+        result = reconcile_transactions(bank, ledger, semantic_threshold=95.0)
+        self.assertEqual(len(result["matches"]), 1)
+        match = result["matches"][0]
+        self.assertEqual(match["match_type"], "AMOUNT_AND_DATE_MATCH")
+
 
 if __name__ == "__main__":
     unittest.main()
