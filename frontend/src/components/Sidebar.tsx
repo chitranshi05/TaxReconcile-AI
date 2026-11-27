@@ -1,115 +1,107 @@
-import type { UserResponse } from '../types/api'
+import React from 'react'
+import {
+  LedgerIcon,
+  DocumentIcon,
+  TransactionIcon,
+  ReconcileIcon,
+  AnomalyIcon,
+  ReportIcon,
+  SettingsIcon,
+  LockIcon,
+} from './Icons'
 
-interface NavItem {
+export interface NavItem {
   id: string
-  index: string
   label: string
+  icon: React.ComponentType<{ size?: number; className?: string }>
   badge?: string | number
 }
 
 interface SidebarProps {
   activePage: string
   onNavigate: (page: string) => void
-  user?: UserResponse | null
-  onLogout?: () => void
-  documentsCount?: number
-  open?: boolean
-  onClose?: () => void
+  userName?: string
+  userRole?: string
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', index: '01', label: 'Dashboard' },
-  { id: 'documents', index: '02', label: 'Documents' },
-  { id: 'transactions', index: '03', label: 'Transactions' },
-  { id: 'reconciliation', index: '04', label: 'Reconciliation' },
-  { id: 'anomalies', index: '05', label: 'Anomaly Detection' },
-  { id: 'reports', index: '06', label: 'Reports' },
-  { id: 'settings', index: '07', label: 'Settings' },
+const PRIMARY_NAV: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LedgerIcon },
+  { id: 'documents', label: 'Documents', icon: DocumentIcon },
+  { id: 'transactions', label: 'Financial Ledger', icon: TransactionIcon },
+  { id: 'reconciliation', label: 'Reconciliation', icon: ReconcileIcon },
+  { id: 'anomalies', label: 'Tax & Anomalies', icon: AnomalyIcon },
 ]
 
-export function Sidebar({
-  activePage,
-  onNavigate,
-  user,
-  onLogout,
-  documentsCount,
-  open = false,
-  onClose,
-}: SidebarProps) {
-  const userInitials = user?.name
-    ? user.name
-        .split(' ')
-        .map((part) => part[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : 'U'
+const AUDIT_NAV: NavItem[] = [
+  { id: 'reports', label: 'Reports & Exports', icon: ReportIcon },
+  { id: 'settings', label: 'Settings & Access', icon: SettingsIcon },
+]
 
+export function Sidebar({ activePage, onNavigate, userName = 'Auditor', userRole = 'USER' }: SidebarProps) {
   return (
-    <div
-      className={`menu${open ? ' is-open' : ''}`}
-      id="site-menu"
-      hidden={!open}
-    >
-      <div className="menu-backdrop" onClick={onClose} />
-      <aside className="sidebar" aria-label="Main navigation">
-        <div className="menu-head">
-          <span className="mono menu-kicker">CUE LIST</span>
-          <button type="button" className="menu-close mono" onClick={onClose}>
-            Close
-          </button>
+    <aside className="sidebar" aria-label="Main navigation">
+      <div>
+        <div className="sidebar-brand">
+          <div className="brand-badge">Institutional Edition</div>
+          <h1 className="brand-title">Private Ledger</h1>
+          <div className="brand-sub">TaxReconcile·AI — Swiss Grade</div>
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => {
-            const badgeValue =
-              item.id === 'documents' && documentsCount !== undefined
-                ? documentsCount
-                : item.badge
-
+          <span className="nav-section-title">Core Operations</span>
+          {PRIMARY_NAV.map((item) => {
+            const Icon = item.icon
+            const isActive = activePage === item.id
             return (
               <button
                 key={item.id}
                 id={`nav-${item.id}`}
-                className={`nav-item${activePage === item.id ? ' active' : ''}`}
-                onClick={() => {
-                  onNavigate(item.id)
-                  onClose?.()
-                }}
-                aria-current={activePage === item.id ? 'page' : undefined}
+                className={`nav-item${isActive ? ' active' : ''}`}
+                onClick={() => onNavigate(item.id)}
+                aria-current={isActive ? 'page' : undefined}
               >
-                <span className="nav-index mono">{item.index}</span>
-                <span className="nav-label">{item.label}</span>
-                {badgeValue !== undefined && (
-                  <span className="nav-badge">{badgeValue}</span>
-                )}
+                <span className="nav-icon">
+                  <Icon size={16} />
+                </span>
+                <span>{item.label}</span>
+                {item.badge !== undefined && <span className="nav-badge">{item.badge}</span>}
+              </button>
+            )
+          })}
+
+          <span className="nav-section-title" style={{ marginTop: '12px' }}>Audit & Governance</span>
+          {AUDIT_NAV.map((item) => {
+            const Icon = item.icon
+            const isActive = activePage === item.id
+            return (
+              <button
+                key={item.id}
+                id={`nav-${item.id}`}
+                className={`nav-item${isActive ? ' active' : ''}`}
+                onClick={() => onNavigate(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+              >
+                <span className="nav-icon">
+                  <Icon size={16} />
+                </span>
+                <span>{item.label}</span>
               </button>
             )
           })}
         </nav>
+      </div>
 
-        <div className="sidebar-footer">
-          <div className="user-card" id="user-profile-card">
-            <div className="user-avatar">{userInitials}</div>
-            <div className="user-info">
-              <span className="user-name" title={user?.name || 'User'}>
-                {user?.name || 'User'}
-              </span>
-              <span className="user-role">{user?.role || 'USER'} · On air</span>
-            </div>
+      <div className="sidebar-footer">
+        <div className="institution-tag">
+          <div className="institution-info">
+            <span className="institution-name">{userName}</span>
+            <span className="institution-jurisdiction">{userRole} · Secure Session</span>
           </div>
-          {onLogout && (
-            <button
-              type="button"
-              className="sidebar-logout-btn"
-              onClick={onLogout}
-              title="Sign out of account"
-            >
-              Sign out
-            </button>
-          )}
+          <span className="institution-lock">
+            <LockIcon size={13} />
+          </span>
         </div>
-      </aside>
-    </div>
+      </div>
+    </aside>
   )
 }

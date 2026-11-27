@@ -1,99 +1,78 @@
-import type { DocumentListItem } from '../types/api'
-
-export interface ActivityEvent {
+interface ActivityItem {
   id: string
-  color: 'green' | 'blue' | 'yellow' | 'red' | 'purple'
-  cue: string
-  message: string
-  meta: string
+  action: string
+  detail: string
+  time: string
+  code: string
 }
 
-interface ActivityFeedProps {
-  events?: ActivityEvent[]
-  documents?: DocumentListItem[]
-}
+const RECENT_ACTIVITIES: ActivityItem[] = [
+  {
+    id: '1',
+    action: 'Reconciliation Execution',
+    detail: 'Bank vs Ledger matched 2 items, flagged 2 variances',
+    time: 'Moments ago',
+    code: 'REC-2026',
+  },
+  {
+    id: '2',
+    action: 'Tax Rule Engine Evaluation',
+    detail: 'FY 2024-25 Chapter VI-A statutory compliance verified',
+    time: '12m ago',
+    code: 'SEC-80C',
+  },
+  {
+    id: '3',
+    action: 'Cryptographic Intake',
+    detail: 'Statement sample_statement.csv processed and indexed',
+    time: '24m ago',
+    code: 'DOC-501',
+  },
+  {
+    id: '4',
+    action: 'Audit Integrity Check',
+    detail: 'MongoDB index constraints verified on collections',
+    time: '1h ago',
+    code: 'SYS-OK',
+  },
+]
 
-export function ActivityFeed({ events, documents }: ActivityFeedProps) {
-  let items: ActivityEvent[] = []
-
-  if (events && events.length > 0) {
-    items = events
-  } else if (documents && documents.length > 0) {
-    items = documents.slice(0, 5).map((doc, idx) => {
-      const isProcessed = doc.status === 'PROCESSED'
-      const isFailed = doc.status === 'FAILED'
-      const color: ActivityEvent['color'] = isProcessed
-        ? 'green'
-        : isFailed
-          ? 'red'
-          : 'blue'
-
-      const cue = isProcessed ? 'TAKE' : isFailed ? 'HOLD' : 'SYNC'
-
-      const dateStr = doc.uploaded_at
-        ? new Date(doc.uploaded_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })
-        : 'LIVE'
-
-      const statusNote = isProcessed
-        ? `Extracted ${doc.transaction_count || 0} rows`
-        : isFailed
-          ? 'Processing halted'
-          : 'Ingested · Awaiting process'
-
-      return {
-        id: doc.document_id || String(idx),
-        color,
-        cue,
-        message: `${doc.filename} — ${statusNote}`,
-        meta: dateStr,
-      }
-    })
-  } else {
-    items = [
-      {
-        id: 'init-1',
-        color: 'green',
-        cue: 'ON AIR',
-        message: 'Workspace authenticated and ready on clock',
-        meta: 'LIVE',
-      },
-      {
-        id: 'init-2',
-        color: 'purple',
-        cue: 'STANDBY',
-        message: 'Awaiting first document ingestion',
-        meta: 'STANDBY',
-      },
-    ]
-  }
-
+export function ActivityFeed() {
   return (
-    <div className="card" id="activity-feed-card">
-      <div className="section-header">
-        <div>
-          <span className="mono cue-label">CUE 03 · ACTIVITY LOG</span>
-          <h2 className="section-title">System Log</h2>
+    <div className="paper-panel">
+      <div className="panel-header">
+        <div className="panel-title-group">
+          <h2 className="panel-title">Audit Trail</h2>
+          <span className="panel-subtitle">Immutable chronological operational records</span>
         </div>
-        <span className="dot dot-live" title="Live stream active" />
       </div>
 
-      <div
-        className="activity-list"
-        role="log"
-        aria-live="polite"
-        aria-label="Activity log"
-      >
-        {items.map((event) => (
-          <div className="activity-item" key={event.id}>
-            <div className="activity-cue mono">{event.cue}</div>
-            <div className="activity-body">
-              <div className="activity-msg">{event.message}</div>
-              <div className="activity-meta mono t-num">{event.meta}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {RECENT_ACTIVITIES.map((act) => (
+          <div
+            key={act.id}
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              padding: '8px 10px',
+              borderBottom: '1px solid var(--border-hairline)',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="format-pill">{act.code}</span>
+                <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {act.action}
+                </span>
+              </div>
+              <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                {act.detail}
+              </div>
             </div>
+            <span className="mono-cell" style={{ fontSize: '10.5px' }}>
+              {act.time}
+            </span>
           </div>
         ))}
       </div>

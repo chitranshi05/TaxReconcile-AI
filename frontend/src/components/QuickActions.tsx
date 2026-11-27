@@ -1,78 +1,73 @@
-// QuickActions — shortcut buttons for common workflows
-
-interface QuickAction {
-  id: string
-  icon: string
-  label: string
-  onClick?: () => void
-}
-
 interface QuickActionsProps {
-  onNavigate?: (page: string) => void
+  onNavigate: (page: string) => void
   onUpload?: () => void
 }
 
 export function QuickActions({ onNavigate, onUpload }: QuickActionsProps) {
-  const actions: QuickAction[] = [
-    {
-      id: 'qa-upload',
-      icon: '01',
-      label: 'Upload Document',
-      onClick: onUpload,
-    },
-    {
-      id: 'qa-transactions',
-      icon: '02',
-      label: 'View Transactions',
-      onClick: () => onNavigate?.('transactions'),
-    },
-    {
-      id: 'qa-reconcile',
-      icon: '03',
-      label: 'Run Reconciliation',
-      onClick: () => onNavigate?.('reconciliation'),
-    },
-    {
-      id: 'qa-anomalies',
-      icon: '04',
-      label: 'Check Anomalies',
-      onClick: () => onNavigate?.('anomalies'),
-    },
-    {
-      id: 'qa-reports',
-      icon: '05',
-      label: 'Generate Report',
-      onClick: () => onNavigate?.('reports'),
-    },
-    {
-      id: 'qa-settings',
-      icon: '06',
-      label: 'Settings',
-      onClick: () => onNavigate?.('settings'),
-    },
-  ]
-
   return (
-    <div className="card" id="quick-actions-card">
-      <div className="section-header">
-        <h2 className="section-title">
-          <span className="section-title-icon">⚡</span>
-          Quick Actions
-        </h2>
+    <div className="paper-panel">
+      <div className="panel-header">
+        <div className="panel-title-group">
+          <h2 className="panel-title">Institutional Actions</h2>
+          <span className="panel-subtitle">Primary accounting workflows</span>
+        </div>
       </div>
-      <div className="quick-actions">
-        {actions.map((action) => (
-          <button
-            key={action.id}
-            id={action.id}
-            className="quick-action-btn"
-            onClick={action.onClick}
-            type="button"
-          >
-            <span className="quick-action-icon">{action.icon}</span>
-            {action.label}
-          </button>
-        ))}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            onUpload?.()
+            onNavigate('documents')
+          }}
+          style={{ justifyContent: 'flex-start', padding: '14px 16px' }}
+        >
+          <div>
+            <div style={{ fontWeight: 600 }}>Ingest Statement</div>
+            <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '2px' }}>
+              Upload CSV or Excel file
+            </div>
+          </div>
+        </button>
+
+        <button
+          className="btn btn-secondary"
+          onClick={() => onNavigate('reconciliation')}
+          style={{ justifyContent: 'flex-start', padding: '14px 16px' }}
+        >
+          <div>
+            <div style={{ fontWeight: 600 }}>Execute Reconciliation</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Bank vs. Books cross-match
+            </div>
+          </div>
+        </button>
+
+        <button
+          className="btn btn-secondary"
+          onClick={() => onNavigate('transactions')}
+          style={{ justifyContent: 'flex-start', padding: '14px 16px' }}
+        >
+          <div>
+            <div style={{ fontWeight: 600 }}>Browse General Ledger</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Filter & verify transactions
+            </div>
+          </div>
+        </button>
+
+        <button
+          className="btn btn-secondary"
+          onClick={() => onNavigate('anomalies')}
+          style={{ justifyContent: 'flex-start', padding: '14px 16px' }}
+        >
+          <div>
+            <div style={{ fontWeight: 600 }}>Tax & Anomalies Audit</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              IQR outliers & Section 269ST
+            </div>
+          </div>
+        </button>
       </div>
     </div>
   )

@@ -1,13 +1,10 @@
-// UploadPanel — drag-and-drop file upload zone
-// Wires to POST /api/documents/upload via the documents service
-
-import { useState, useRef, type DragEvent } from 'react'
+import React, { useState, useRef, type DragEvent } from 'react'
+import { UploadIcon } from './Icons'
 import { uploadDocument } from '../services/documents'
 
 const ACCEPTED_TYPES = ['CSV', 'XLSX', 'XLS', 'PDF', 'JSON']
 
 interface UploadPanelProps {
-  /** Called after a successful upload with the returned document_id */
   onUploaded?: (documentId: string, filename: string) => void
 }
 
@@ -20,19 +17,15 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
 
   function handleDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
-    e.stopPropagation()
     setUploadState('dragging')
   }
 
-  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault()
-    e.stopPropagation()
+  function handleDragLeave() {
     setUploadState('idle')
   }
 
   async function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
-    e.stopPropagation()
     const file = e.dataTransfer.files?.[0]
     if (file) await submitFile(file)
   }
@@ -49,23 +42,19 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
     try {
       const result = await uploadDocument(file)
       setUploadState('success')
-      setMessage(`"${result.filename}" uploaded — ID: ${result.document_id}`)
+      setMessage(`"${result.filename}" uploaded successfully. ID: ${result.document_id.slice(-8)}`)
       onUploaded?.(result.document_id, result.filename)
 
-      // Reset after 3 s
       setTimeout(() => {
         setUploadState('idle')
         setMessage('')
-      }, 3000)
+      }, 3500)
     } catch (err: unknown) {
       setUploadState('error')
-      setMessage(
-        err instanceof Error ? err.message : 'Upload failed. Please try again.',
-      )
-      setTimeout(() => setUploadState('idle'), 4000)
+      setMessage(err instanceof Error ? err.message : 'Upload failed. Please try again.')
+      setTimeout(() => setUploadState('idle'), 4500)
     }
 
-    // Clear file input so the same file can be re-uploaded
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -73,80 +62,75 @@ export function UploadPanel({ onUploaded }: UploadPanelProps) {
   const isUploading = uploadState === 'uploading'
 
   return (
-    <div className="card" id="upload-panel">
-      <div className="section-header">
-        <h2 className="section-title">
-          <span className="section-title-icon">📤</span>
-          Upload Document
-        </h2>
+    <div className="paper-panel">
+      <div className="panel-header">
+        <div className="panel-title-group">
+          <h2 className="panel-title">Statement Intake</h2>
+          <span className="panel-subtitle">Ingest bank accounts, books & ledger files</span>
+        </div>
       </div>
 
-      {/* Drop zone */}
       <div
-        className={`upload-zone${isDragging ? ' drag-over' : ''}`}
-        id="upload-dropzone"
+        className={`dropzone-container${isDragging ? ' drag-over' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => !isUploading && fileInputRef.current?.click()}
         role="button"
         tabIndex={0}
-        aria-label="Drop file here or click to browse"
-        onKeyDown={(e) =>
-          e.key === 'Enter' && !isUploading && fileInputRef.current?.click()
-        }
       >
         <input
           ref={fileInputRef}
           type="file"
-          id="file-input"
           accept=".csv,.xlsx,.xls,.pdf,.json"
           style={{ display: 'none' }}
           onChange={handleFileChange}
         />
 
+        <div className="dropzone-icon">
+          <UploadIcon size={32} />
+        </div>
+
         {isUploading ? (
           <>
-            <div className="upload-icon">ON AIR</div>
-            <div className="upload-title">Uploading…</div>
-            <div className="upload-sub">Please wait while your file is being uploaded</div>
+            <div className="dropzone-title">Encrypting & Uploading Statement…</div>
+            <div className="dropzone-sub">Streamed to isolated disk storage with cryptographic hash</div>
           </>
         ) : uploadState === 'success' ? (
           <>
-            <div className="upload-icon">TAKE</div>
-            <div className="upload-title">Upload Successful</div>
-            <div className="upload-sub" style={{ color: 'var(--accent-green)' }}>{message}</div>
+            <div className="dropzone-title" style={{ color: 'var(--semantic-success)' }}>
+              Intake Verified
+            </div>
+            <div className="dropzone-sub" style={{ color: 'var(--semantic-success)' }}>{message}</div>
           </>
         ) : uploadState === 'error' ? (
           <>
-            <div className="upload-icon">HOLD</div>
-            <div className="upload-title">Upload Failed</div>
-            <div className="upload-sub" style={{ color: 'var(--accent-red)' }}>{message}</div>
+            <div className="dropzone-title" style={{ color: 'var(--semantic-error)' }}>
+              Upload Rejected
+            </div>
+            <div className="dropzone-sub" style={{ color: 'var(--semantic-error)' }}>{message}</div>
           </>
         ) : (
           <>
-            <div className="upload-icon">CUE 02</div>
-            <div className="upload-title">Drop your file here</div>
-            <div className="upload-sub">
-              or click to browse — supports the following formats
-            </div>
-            <div className="upload-types">
+            <div className="dropzone-title">Select Financial Statement</div>
+            <div className="dropzone-sub">Drop CSV, Excel, or JSON files here or browse local disk</div>
+            <div className="dropzone-formats">
               {ACCEPTED_TYPES.map((t) => (
-                <span key={t} className="type-badge">{t}</span>
+                <span key={t} className="format-pill">{t}</span>
               ))}
             </div>
-            <button
-              className="upload-btn"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!isUploading) {
+            <div style={{ marginTop: '16px' }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={(e) => {
+                  e.stopPropagation()
                   fileInputRef.current?.click()
-                }
-              }}
-            >
-              Browse Files
-            </button>
+                }}
+              >
+                Browse Files
+              </button>
+            </div>
           </>
         )}
       </div>
