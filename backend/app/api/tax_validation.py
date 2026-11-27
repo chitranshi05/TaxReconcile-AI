@@ -7,11 +7,13 @@ from app.schemas.tax_validation import (
     DocumentTaxValidationRequest,
     TaxValidationRequest,
 )
+from app.schemas.tds_discrepancy import AdvancedTDSAnalysisRequest, AdvancedTDSAnalysisResponse
 from app.services.tax_validation.tax_rule_engine import (
     DEFAULT_FY_CONFIGS,
     TaxRuleEngine,
     validate_tax_records,
 )
+from app.services.tax_validation.tds_discrepancy_detector import run_advanced_tds_analysis
 
 router = APIRouter(
     prefix="/api/tax-validation",
@@ -69,6 +71,50 @@ def run_direct_tax_validation(
         is_senior_citizen=request.is_senior_citizen,
     )
     return result
+
+
+@router.post("/tds-discrepancy", status_code=200, response_model=AdvancedTDSAnalysisResponse)
+def run_advanced_tds_discrepancy_analysis(
+    request: AdvancedTDSAnalysisRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Advanced TDS Discrepancy Detection (6-pass analysis).
+
+    **Pass 1 — Rate Validation**: Computes expected TDS from gross amount using
+    section-specific statutory rates (194A, 194C, 194H, 194I, 194J, etc.) and
+    flags deviations beyond tolerance.
+
+    **Pass 2 — Quarter-wise Reconciliation**: Compares 26AS TDS quarter-by-quarter
+    against book entries (Q1: Apr-Jun, Q2: Jul-Sep, Q3: Oct-Dec, Q4: Jan-Mar).
+    Requires `tds_entries_books`.
+
+    **Pass 3 — Late Deduction / Late Deposit**: Detects TDS deducted in a later
+    quarter than the payment date, or deposited after the statutory due date
+    (Section 201(1A) interest implications).
+
+    **Pass 4 — Lower Deduction Certificate Conflict**: Flags when TDS is deducted
+    at standard rates despite a valid Form 15G/15H or Section 197 certificate.
+    Requires `exemption_certificates`.
+
+    **Pass 5 — Multi-Deductor PAN Aggregation**: Aggregates TDS credits per PAN
+    and identifies excess credit over tax liability or unusual multi-deductor patterns.
+
+    **Pass 6 — Unclaimed TDS Credit**: Cross-checks 26AS TDS with the ITR TDS
+    schedule and flags credits not yet claimed. Requires `itr_tds_schedule`.
+
+    All passes are independent; only passes with sufficient input data are executed.
+    """
+    return run_advanced_tds_analysis(
+        tds_entries_26as=request.tds_entries_26as,
+        tds_entries_books=request.tds_entries_books,
+        exemption_certificates=request.exemption_certificates,
+        itr_tds_schedule=request.itr_tds_schedule,
+        declared_income=request.declared_income,
+        tax_liability=request.tax_liability,
+        financial_year=request.financial_year,
+        tolerance=request.tolerance,
+    )
 
 
 @router.post("/documents/{document_id}/validate", status_code=200)

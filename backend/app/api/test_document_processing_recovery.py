@@ -72,6 +72,43 @@ class TestDocumentProcessingRecovery(unittest.TestCase):
             "errors": [],
         }
 
+    def test_xlsx_and_json_processing_use_their_processors_and_audit_success(self):
+        cases = (
+            ("XLSX", "app.api.documents.process_excel_file", "test.xlsx"),
+            ("JSON", "app.api.documents.process_json_file", "test.json"),
+        )
+        for file_type, processor_path, filename in cases:
+            with self.subTest(file_type=file_type):
+                self.db.documents.find_one.return_value.update(
+                    {"file_type": file_type, "filename": filename, "status": "UPLOADED"}
+                )
+                self.db.documents.update_one.side_effect = (
+                    lambda *args: SimpleNamespace(matched_count=1)
+                )
+                with (
+                    patch("app.api.documents.get_database", return_value=self.db),
+                    patch(processor_path, return_value=self._process_result()) as processor,
+                    patch(
+                        "app.api.documents.save_valid_transactions",
+                        return_value=2,
+                    ) as save_transactions,
+                    patch("app.api.documents.log_audit_event") as audit,
+                    patch("app.api.documents.UPLOAD_DIR") as upload_dir,
+                ):
+                    upload_dir.__truediv__.return_value = filename
+                    result = process_document(self.document_id, self.user)
+
+                processor.assert_called_once_with(filename)
+                save_transactions.assert_called_once()
+                self.assertEqual(result["saved_transactions"], 2)
+                audit.assert_called_once_with(
+                    action="DOCUMENT_PROCESSED",
+                    user_id=self.owner_id,
+                    resource_type="document",
+                    resource_id=self.document_id,
+                    details={"saved_transactions": 2},
+                )
+
     @patch("app.api.documents.process_csv_file")
     @patch("app.api.documents.save_valid_transactions")
     @patch("app.api.documents.get_database")
@@ -300,11 +337,12 @@ class TestDocumentProcessingRecovery(unittest.TestCase):
         mock_process.assert_not_called()
         mock_save.assert_not_called()
 
+    @patch("app.api.documents.log_audit_event")
     @patch("app.api.documents.process_csv_file")
     @patch("app.api.documents.save_valid_transactions")
     @patch("app.api.documents.get_database")
     def test_csv_validation_failure_marks_document_failed(
-        self, mock_get_database, mock_save, mock_process
+        self, mock_get_database, mock_save, mock_process, mock_audit
     ):
         mock_get_database.return_value = self.db
         mock_process.side_effect = ValueError("Invalid CSV contents")
@@ -326,12 +364,20 @@ class TestDocumentProcessingRecovery(unittest.TestCase):
         )
         self.db.transactions.delete_many.assert_not_called()
         mock_save.assert_not_called()
+        mock_audit.assert_called_once_with(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=self.owner_id,
+            resource_type="document",
+            resource_id=self.document_id,
+            details={"error": "Invalid CSV contents"},
+        )
 
+    @patch("app.api.documents.log_audit_event")
     @patch("app.api.documents.process_csv_file")
     @patch("app.api.documents.save_valid_transactions")
     @patch("app.api.documents.get_database")
     def test_failed_document_can_be_retried(
-        self, mock_get_database, mock_save, mock_process
+        self, mock_get_database, mock_save, mock_process, mock_audit
     ):
         mock_get_database.return_value = self.db
         self.db.documents.find_one.return_value["status"] = "FAILED"
@@ -375,6 +421,19 @@ class TestDocumentProcessingRecovery(unittest.TestCase):
                 }
                 for _ in self._process_result()["transactions"]
             ],
+        )
+        mock_audit.assert_any_call(
+            action="DOCUMENT_PROCESSING_RETRIED",
+            user_id=self.owner_id,
+            resource_type="document",
+            resource_id=self.document_id,
+        )
+        mock_audit.assert_any_call(
+            action="DOCUMENT_PROCESSED",
+            user_id=self.owner_id,
+            resource_type="document",
+            resource_id=self.document_id,
+            details={"saved_transactions": 2},
         )
 
     @patch("app.api.documents.process_csv_file")

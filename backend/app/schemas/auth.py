@@ -1,4 +1,6 @@
 
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -24,3 +26,12 @@ class UserResponse(BaseModel):
     name: str
     email: EmailStr
     role: str = "USER"
+
+
+class ManagedUserResponse(UserResponse):
+    is_active: bool
+    created_at: datetime | None = None
+
+
+class UserActivationUpdate(BaseModel):
+    is_active: bool

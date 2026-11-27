@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 from bson import ObjectId
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from app.services.audit_service import log_audit_event
 
 from app.config import settings
@@ -34,18 +34,60 @@ from app.database.mongodb import get_database
 from app.models.document import create_document
 from app.schemas.document import DocumentMetadataResponse
 from app.services.auth_dependencies import get_current_user
+from app.services.processing_pipeline import run_document_pipeline
 from app.services.ingestion.column_mapper import detect_columns
 from app.services.ingestion.data_validator import validate_transactions
 from app.services.ingestion.inspector import inspect_file
 from app.services.ingestion.csv_processor import process_csv_file
+from app.services.ingestion.excel_processor import process_excel_file
+from app.services.ingestion.json_processor import process_json_file
 from app.services.ingestion.transaction_saver import save_valid_transactions
 from app.services.ingestion.duplicate_detector import detect_duplicates
 from app.services.ingestion.anomaly_detector import detect_anomalies
+from app.services.ingestion.entity_normalizer import normalize_transaction_entity
+from app.services.ingestion.transaction_classifier import (
+    classify_transaction,
+    classify_transactions,
+    summarize_classification,
+)
+from app.schemas.classification import (
+    ClassifyTransactionRequest,
+    TransactionClassificationResponse,
+    ClassifyBatchRequest,
+    DocumentClassificationResponse,
+)
+from app.schemas.entity_normalization import (
+    NormalizeDescriptionRequest,
+    NormalizedEntityResponse,
+    DocumentEntitiesResponse,
+)
+
+
+from app.services.reconciliation.semantic_matcher import (
+    SemanticMatcher,
+    compute_semantic_similarity,
+    get_shared_concepts,
+)
+from app.schemas.semantic_matching import (
+    SemanticSimilarityRequest,
+    SemanticSimilarityResponse,
+    SemanticBatchCompareRequest,
+    SemanticBatchCompareResponse,
+    SemanticCompareCandidate,
+)
+
+
+from app.services.analysis.missing_income_detector import detect_missing_income
+from app.schemas.missing_income import (
+    MissingIncomeRequest,
+    MissingIncomeResponse,
+    DocumentMissingIncomeResponse,
+)
 
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_FILE_TYPES = {
@@ -89,10 +131,11 @@ def _get_owned_document(document_id: str, current_user: dict) -> dict:
 
 @router.post("/upload", status_code=201)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
-    """Upload a financial document and persist its metadata."""
+    """Upload a financial document and queue it for automated pipeline processing."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected.")
 
@@ -169,12 +212,25 @@ async def upload_document(
     finally:
         await file.close()
 
+    document_id = str(result.inserted_id)
+    owner_id = str(current_user["_id"])
+
+    # Mark pipeline QUEUED and start background processing
+    if file_type in {"CSV", "XLSX", "JSON"}:
+        get_database().documents.update_one(
+            {"_id": result.inserted_id},
+            {"$set": {"pipeline_status": "QUEUED",
+                      "pipeline_status_updated_at": datetime.now(timezone.utc)}},
+        )
+        background_tasks.add_task(run_document_pipeline, document_id, owner_id)
+
     return {
-        "message": "Document uploaded successfully.",
-        "document_id": str(result.inserted_id),
+        "message": "Document uploaded. Processing started in the background.",
+        "document_id": document_id,
         "filename": safe_name,
         "file_type": file_type,
         "status": document["status"],
+        "pipeline_status": "QUEUED" if file_type in {"CSV", "XLSX", "JSON"} else "N/A",
     }
 
 
@@ -362,10 +418,10 @@ def process_document(
             detail="Document not found.",
         )
 
-    if document.get("file_type") != "CSV":
+    if document.get("file_type") not in {"CSV", "XLSX", "JSON"}:
         raise HTTPException(
             status_code=400,
-            detail="Processing currently supports CSV files only.",
+            detail="Processing currently supports CSV, XLSX, and JSON files only.",
         )
 
     owner_id = document.get("owner_id")
@@ -450,10 +506,21 @@ def process_document(
                     f"processing attempt: {error}"
                 ),
             ) from error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_RETRIED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+        )
 
     file_path = UPLOAD_DIR / document["filename"]
     try:
-        result = process_csv_file(str(file_path))
+        processor = {
+            "CSV": process_csv_file,
+            "XLSX": process_excel_file,
+            "JSON": process_json_file,
+        }[document["file_type"]]
+        result = processor(str(file_path))
     except ValueError as error:
         try:
             mark_processing_failed()
@@ -465,6 +532,13 @@ def process_document(
                     f"Failed to mark document as FAILED: {status_error}"
                 ),
             ) from status_error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": str(error)},
+        )
         raise HTTPException(
             status_code=400,
             detail=str(error),
@@ -480,6 +554,13 @@ def process_document(
                     f"Failed to mark document as FAILED: {status_error}"
                 ),
             ) from status_error
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": str(error)},
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process document: {error}",
@@ -530,10 +611,25 @@ def process_document(
             detail += f". Rollback of saved transactions also failed: {rollback_error}"
         if status_error is not None:
             detail += f". Failed to mark document as FAILED: {status_error}"
+        log_audit_event(
+            action="DOCUMENT_PROCESSING_FAILED",
+            user_id=str(current_user["_id"]),
+            resource_type="document",
+            resource_id=document_id,
+            details={"error": detail},
+        )
         raise HTTPException(
             status_code=500,
             detail=detail,
         ) from error
+
+    log_audit_event(
+        action="DOCUMENT_PROCESSED",
+        user_id=str(current_user["_id"]),
+        resource_type="document",
+        resource_id=document_id,
+        details={"saved_transactions": saved_count},
+    )
 
     return {
         "message": "CSV processing completed.",
@@ -774,3 +870,228 @@ def get_document_anomalies(
         "notes": result["notes"],
         "disclaimer": result["disclaimer"],
     }
+
+
+@router.post("/normalize-description", response_model=NormalizedEntityResponse)
+def normalize_description_endpoint(
+    request: NormalizeDescriptionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Normalize an ad-hoc transaction description.
+    Strips banking gateway prefixes, reference numbers, card masks, and VPA handles,
+    detects payment channel, and maps to canonical counterparty/merchant entities.
+    """
+    return normalize_transaction_entity(request.description)
+
+
+@router.get("/{document_id}/entities", response_model=DocumentEntitiesResponse)
+def get_document_entities(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Extract and normalize counterparty entities for all transactions in an uploaded document.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"description": 1, "_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    normalized_entities = [
+        normalize_transaction_entity(tx.get("description", ""))
+        for tx in transactions
+    ]
+
+    return {
+        "document_id": document_id,
+        "transaction_count": len(normalized_entities),
+        "entities": normalized_entities,
+    }
+
+
+@router.post("/classify-transaction", response_model=TransactionClassificationResponse)
+def classify_single_transaction_endpoint(
+    request: ClassifyTransactionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Categorize a transaction into financial categories, sub-categories, and statutory tax heads.
+    """
+    return classify_transaction(request.model_dump())
+
+
+@router.post("/classify-batch")
+def classify_batch_endpoint(
+    request: ClassifyBatchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Classify a batch of transactions and return enriched items alongside summary P&L and tax head metrics.
+    """
+    items = [t.model_dump() for t in request.transactions]
+    classified = classify_transactions(items)
+    summary = summarize_classification(classified)
+    return {
+        "summary": summary,
+        "classified_transactions": classified,
+    }
+
+
+@router.get("/{document_id}/classification", response_model=DocumentClassificationResponse)
+def get_document_classification(
+    document_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Classify all transactions in an uploaded document and generate financial category and tax head summaries.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    for tx in transactions:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+        created_at = tx.get("created_at")
+        if created_at is not None and hasattr(created_at, "isoformat"):
+            tx["created_at"] = created_at.isoformat()
+
+    classified = classify_transactions(transactions)
+    summary = summarize_classification(classified)
+
+    return {
+        "document_id": document_id,
+        "summary": summary,
+        "classified_transactions": classified,
+    }
+
+@router.post("/semantic-similarity", response_model=SemanticSimilarityResponse)
+def compute_semantic_similarity_endpoint(
+    request: SemanticSimilarityRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Compute domain-aware semantic similarity score between two transaction descriptions.
+    """
+    matcher = SemanticMatcher(semantic_threshold=request.semantic_threshold)
+    score = matcher.compute_similarity(request.text1, request.text2)
+    concepts = matcher.extract_matched_concepts(request.text1, request.text2)
+    return SemanticSimilarityResponse(
+        text1=request.text1,
+        text2=request.text2,
+        similarity_score=score,
+        is_match=score >= request.semantic_threshold,
+        matched_concepts=concepts,
+        method="TF-IDF + Domain Synonyms",
+    )
+
+
+@router.post("/semantic-compare", response_model=SemanticBatchCompareResponse)
+def compare_semantic_batch_endpoint(
+    request: SemanticBatchCompareRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Compare a reference transaction narration against a list of candidate narrations
+    and rank by semantic similarity.
+    """
+    matcher = SemanticMatcher(semantic_threshold=request.semantic_threshold)
+    raw_results = matcher.compare_pairwise(request.reference_text, request.candidates)
+    matches_count = sum(1 for r in raw_results if r["is_match"])
+
+    candidates_list = [
+        SemanticCompareCandidate(
+            candidate=r["candidate"],
+            similarity_score=r["similarity_score"],
+            is_match=r["is_match"],
+            matched_concepts=r["matched_concepts"],
+        )
+        for r in raw_results
+    ]
+
+    return SemanticBatchCompareResponse(
+        reference_text=request.reference_text,
+        candidates_count=len(request.candidates),
+        matches_count=matches_count,
+        results=candidates_list,
+    )
+
+@router.post("/detect-missing-income", response_model=MissingIncomeResponse)
+def detect_missing_income_endpoint(
+    request: MissingIncomeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Analyze a batch of transactions to identify missing periodic income,
+    underpayment drops, and uncollected accrued income.
+    """
+    result = detect_missing_income(
+        bank_transactions=request.transactions,
+        ledger_transactions=request.ledger_transactions,
+        as_of_date=request.as_of_date,
+        underpayment_ratio_threshold=request.underpayment_ratio_threshold,
+        uncollected_tolerance_days=request.uncollected_tolerance_days,
+    )
+    return result
+
+
+@router.get("/{document_id}/missing-income", response_model=DocumentMissingIncomeResponse)
+def get_document_missing_income_endpoint(
+    document_id: str,
+    as_of_date: str | None = None,
+    underpayment_ratio_threshold: float = 0.70,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Detect recurring income streams and missing income gaps in an uploaded bank document.
+    """
+    document = _get_owned_document(document_id, current_user)
+    db = get_database()
+
+    transactions = list(
+        db.transactions.find(
+            {
+                "document_id": document_id,
+                "owner_id": document.get("owner_id"),
+            },
+            {"_id": 0},
+        ).sort("transaction_date", 1)
+    )
+
+    for tx in transactions:
+        tx_date = tx.get("transaction_date")
+        if tx_date is not None and hasattr(tx_date, "isoformat"):
+            tx["transaction_date"] = tx_date.isoformat()
+
+    result = detect_missing_income(
+        bank_transactions=transactions,
+        as_of_date=as_of_date,
+        underpayment_ratio_threshold=underpayment_ratio_threshold,
+    )
+
+    return {
+        "document_id": document_id,
+        "summary": result["summary"],
+        "recurring_streams": result["recurring_streams"],
+        "findings": result["findings"],
+    }
+

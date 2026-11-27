@@ -1,11 +1,5 @@
-from app.database.mongodb import client, database
+def check_database_connection() -> None:
+    """Explicitly verify MongoDB connectivity when requested."""
+    from app.database.mongodb import client
 
-
-try:
     client.admin.command("ping")
-    print("MongoDB connection successful!")
-    print(f"Database: {database.name}")
-
-except Exception as e:
-    print("MongoDB connection failed!")
-    print(e)

@@ -15,11 +15,13 @@ and a pre-registered test user with a valid auth token.
 """
 
 import io
+import json
 import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from openpyxl import Workbook
 import pytest
 
 
@@ -125,6 +127,111 @@ def test_upload_two_same_filenames_no_collision(client, auth_headers):
     assert r2.status_code == 201
     # Different document IDs
     assert r1.json()["document_id"] != r2.json()["document_id"]
+
+
+def test_corrupt_excel_returns_client_errors_and_failed_status(
+    client, auth_headers
+):
+    upload_response = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "corrupt.xlsx",
+                io.BytesIO(b"not an Excel workbook"),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        headers=auth_headers,
+    )
+    assert upload_response.status_code == 201
+    document_id = upload_response.json()["document_id"]
+
+    inspect_response = client.get(
+        f"/api/documents/{document_id}/inspect",
+        headers=auth_headers,
+    )
+    assert inspect_response.status_code == 400
+    assert "Unable to read Excel workbook" in inspect_response.json()["detail"]
+
+    process_response = client.post(
+        f"/api/documents/{document_id}/process",
+        headers=auth_headers,
+    )
+    assert process_response.status_code == 400
+    assert "Unable to read Excel workbook" in process_response.json()["detail"]
+
+    document_response = client.get(
+        f"/api/documents/{document_id}",
+        headers=auth_headers,
+    )
+    assert document_response.status_code == 200
+    assert document_response.json()["status"] == "FAILED"
+
+
+def test_excel_and_json_documents_process_through_api(client, auth_headers):
+    workbook_bytes = io.BytesIO()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Date", "Description", "Amount"])
+    sheet.append(["2026-04-01", "Excel transaction", 125.5])
+    workbook.save(workbook_bytes)
+
+    excel_upload = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "transactions.xlsx",
+                workbook_bytes.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        headers=auth_headers,
+    )
+    assert excel_upload.status_code == 201
+    excel_id = excel_upload.json()["document_id"]
+    assert client.get(
+        f"/api/documents/{excel_id}/inspect", headers=auth_headers
+    ).status_code == 200
+    excel_process = client.post(
+        f"/api/documents/{excel_id}/process", headers=auth_headers
+    )
+    assert excel_process.status_code == 200
+    excel_transactions = client.get(
+        f"/api/documents/{excel_id}/transactions", headers=auth_headers
+    )
+    assert excel_transactions.json()["transactions"][0]["amount"] == 125.5
+
+    json_upload = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "transactions.json",
+                json.dumps(
+                    {
+                        "transactions": [
+                            {
+                                "date": "2026-04-02",
+                                "description": "JSON transaction",
+                                "credit": 250,
+                            }
+                        ]
+                    }
+                ).encode(),
+                "application/json",
+            )
+        },
+        headers=auth_headers,
+    )
+    assert json_upload.status_code == 201
+    json_id = json_upload.json()["document_id"]
+    json_process = client.post(
+        f"/api/documents/{json_id}/process", headers=auth_headers
+    )
+    assert json_process.status_code == 200
+    json_transactions = client.get(
+        f"/api/documents/{json_id}/transactions", headers=auth_headers
+    )
+    assert json_transactions.json()["transactions"][0]["credit"] == 250
 
 
 # ── List ──────────────────────────────────────────────────────────────────────

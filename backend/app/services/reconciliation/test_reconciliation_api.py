@@ -1,9 +1,12 @@
 import unittest
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 from bson import ObjectId
 from fastapi import HTTPException
+from openpyxl import load_workbook
 
 from app.api.reconciliation import (
+    download_reconciliation_report,
     get_reconciliation,
     list_reconciliations,
     run_reconciliation,
@@ -230,6 +233,116 @@ class TestReconciliationAPI(unittest.TestCase):
             missing_ctx.exception.detail,
             "Reconciliation record not found.",
         )
+
+    def test_user_can_download_xlsx_report_for_owned_reconciliation(self):
+        reconciliation_id = str(ObjectId())
+        self.mock_db.reconciliations.find_one.return_value = {
+            "_id": ObjectId(reconciliation_id),
+            "owner_id": self.user_id,
+            "bank_filename": "bank.csv",
+            "ledger_filename": "ledger.xlsx",
+            "summary": {"matched_count": 1},
+            "matches": [
+                {
+                    "status": "MATCHED",
+                    "match_type": "EXACT_MATCH",
+                    "bank_transaction": {
+                        "transaction_date": "2026-04-01",
+                        "description": "Salary",
+                        "amount": 100,
+                    },
+                    "ledger_transaction": {
+                        "transaction_date": "2026-04-01",
+                        "description": "Salary",
+                        "amount": 100,
+                    },
+                    "amount_variance": 0,
+                    "confidence_score": 1,
+                }
+            ],
+            "bank_only": [
+                {
+                    "transaction_date": "2026-04-02",
+                    "description": "=HYPERLINK(\"https://example.invalid\")",
+                    "amount": 1,
+                }
+            ],
+            "ledger_only": [],
+        }
+
+        with patch("app.api.reconciliation.get_database", return_value=self.mock_db):
+            response = download_reconciliation_report(
+                reconciliation_id,
+                "xlsx",
+                self.current_user,
+            )
+
+        self.assertEqual(
+            response.media_type,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(".xlsx", response.headers["content-disposition"])
+        workbook = load_workbook(BytesIO(response.body), read_only=True)
+        self.assertEqual(
+            workbook.sheetnames,
+            ["Summary", "Matches", "Bank only", "Ledger only"],
+        )
+        self.assertTrue(workbook["Bank only"]["B2"].value.startswith("'="))
+        self.mock_db.reconciliations.find_one.assert_called_once_with(
+            {"_id": ObjectId(reconciliation_id), "owner_id": self.user_id}
+        )
+
+    def test_user_cannot_download_another_users_pdf_report(self):
+        reconciliation_id = str(ObjectId())
+        self.mock_db.reconciliations.find_one.return_value = None
+
+        with patch("app.api.reconciliation.get_database", return_value=self.mock_db):
+            with self.assertRaises(HTTPException) as context:
+                download_reconciliation_report(
+                    reconciliation_id,
+                    "pdf",
+                    self.current_user,
+                )
+
+        self.assertEqual(context.exception.status_code, 404)
+        self.mock_db.reconciliations.find_one.assert_called_once_with(
+            {"_id": ObjectId(reconciliation_id), "owner_id": self.user_id}
+        )
+
+    def test_pdf_report_has_pdf_signature(self):
+        reconciliation_id = str(ObjectId())
+        self.mock_db.reconciliations.find_one.return_value = {
+            "_id": ObjectId(reconciliation_id),
+            "owner_id": self.user_id,
+            "bank_filename": "bank & <statement>.csv",
+            "ledger_filename": "ledger.csv",
+            "summary": {"matched_count": 0},
+            "matches": [],
+            "bank_only": [],
+            "ledger_only": [],
+        }
+
+        with patch("app.api.reconciliation.get_database", return_value=self.mock_db):
+            response = download_reconciliation_report(
+                reconciliation_id,
+                "pdf",
+                self.current_user,
+            )
+
+        self.assertEqual(response.media_type, "application/pdf")
+        self.assertTrue(response.body.startswith(b"%PDF-"))
+
+    def test_report_rejects_unsupported_format(self):
+        with patch("app.api.reconciliation.get_database", return_value=self.mock_db):
+            with self.assertRaises(HTTPException) as context:
+                download_reconciliation_report(
+                    str(ObjectId()),
+                    "csv",
+                    self.current_user,
+                )
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.mock_db.reconciliations.find_one.assert_not_called()
 
 
 if __name__ == "__main__":

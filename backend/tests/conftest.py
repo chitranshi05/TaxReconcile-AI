@@ -20,29 +20,14 @@ TestClient:
 import pytest
 from fastapi.testclient import TestClient
 
+import app.api.documents as documents_api
 from app.main import app
 
 
 @pytest.fixture(scope="function")
-def client(monkeypatch):
-    """
-    Provide a TestClient with an isolated in-memory MongoDB for each test.
-
-    scope="function" means a fresh database is created for every test,
-    so tests cannot affect each other.
-    """
-    try:
-        import mongomock
-
-        mock_client = mongomock.MongoClient()
-        mock_db = mock_client["test_tax_reconcile"]
-
-        monkeypatch.setattr("app.database.mongodb.database", mock_db)
-        monkeypatch.setattr("app.database.mongodb.client", mock_client)
-    except ImportError:
-        # If mongomock is not installed we fall back to a real local MongoDB.
-        # Tests may interfere with each other in this mode.
-        pass
+def client(monkeypatch, test_database, tmp_path):
+    """Provide an API client isolated from production MongoDB and uploads."""
+    monkeypatch.setattr(documents_api, "UPLOAD_DIR", tmp_path)
 
     with TestClient(app, raise_server_exceptions=True) as test_client:
         yield test_client

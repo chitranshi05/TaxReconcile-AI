@@ -10,7 +10,7 @@ from pwdlib import PasswordHash
 
 # Load backend/.env explicitly
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(ENV_FILE, override=True)
+load_dotenv(ENV_FILE)
 
 # Initialize password hashing
 password_hash = PasswordHash.recommended()
@@ -19,6 +19,10 @@ password_hash = PasswordHash.recommended()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("JWT_SECRET_KEY is missing from backend/.env")
+if SECRET_KEY == "your-secret-key-here" or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "JWT_SECRET_KEY must be replaced with a secret of at least 32 characters."
+    )
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = 30

@@ -1,11 +1,25 @@
 from datetime import datetime, timezone
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.database.mongodb import get_database
 from app.services.auth_dependencies import get_current_user
 from app.schemas.reconciliation import ReconciliationRequest
+from app.schemas.confidence import (
+    MatchConfidenceEvaluationRequest,
+    MatchConfidenceResponse,
+    BatchConfidenceEvaluationRequest,
+    BatchConfidenceResponse,
+)
 from app.services.reconciliation.reconciliation_engine import reconcile_transactions
+from app.services.reconciliation.confidence_scorer import (
+    ConfidenceScorer,
+    compute_batch_confidence,
+)
+from app.services.reconciliation.report_generator import (
+    generate_reconciliation_pdf,
+    generate_reconciliation_xlsx,
+)
 
 router = APIRouter(
     prefix="/api/reconciliation",
@@ -127,6 +141,8 @@ def run_reconciliation(
         ledger_transactions=ledger_transactions,
         date_tolerance_days=request.date_tolerance_days,
         amount_tolerance=request.amount_tolerance,
+        fuzzy_threshold=request.fuzzy_threshold,
+        semantic_threshold=request.semantic_threshold,
     )
 
     # Serialize datetimes for JSON & storage
@@ -143,6 +159,8 @@ def run_reconciliation(
         "ledger_filename": ledger_doc.get("filename"),
         "date_tolerance_days": request.date_tolerance_days,
         "amount_tolerance": request.amount_tolerance,
+        "fuzzy_threshold": request.fuzzy_threshold,
+        "semantic_threshold": request.semantic_threshold,
         "summary": result["summary"],
         "matches": result["matches"],
         "bank_only": result["bank_only"],
@@ -163,6 +181,66 @@ def run_reconciliation(
         "matches": result["matches"],
         "bank_only": result["bank_only"],
         "ledger_only": result["ledger_only"],
+    }
+
+
+@router.post("/confidence-score", status_code=200, response_model=MatchConfidenceResponse)
+def evaluate_single_match_confidence(
+    request: MatchConfidenceEvaluationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Evaluate multi-factor confidence score for a candidate transaction match.
+    Computes component scores for amount agreement, date proximity, description similarity,
+    and uniqueness/ambiguity.
+    """
+    scorer = ConfidenceScorer(
+        date_tolerance_days=request.date_tolerance_days,
+        amount_tolerance=request.amount_tolerance,
+    )
+    return scorer.score_match(
+        bank_tx=request.bank_transaction,
+        ledger_tx=request.ledger_transaction,
+        match_type=request.match_type,
+        similarity_score=request.similarity_score,
+        date_difference_days=request.date_difference_days,
+        amount_variance=request.amount_variance,
+        candidate_count=request.candidate_count,
+        second_best_similarity=request.second_best_similarity,
+    )
+
+
+@router.post("/batch-confidence-score", status_code=200, response_model=BatchConfidenceResponse)
+def evaluate_batch_confidence(
+    request: BatchConfidenceEvaluationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Enrich an entire set of matches with calibrated confidence scores, tiers,
+    and automated workflow recommendations.
+    """
+    enriched = compute_batch_confidence(
+        matches=request.matches,
+        date_tolerance_days=request.date_tolerance_days,
+        amount_tolerance=request.amount_tolerance,
+    )
+    total = len(enriched)
+    avg_conf = round(sum(m["confidence_score"] for m in enriched) / total, 2) if total > 0 else 0.0
+
+    conf_dist: dict[str, int] = {}
+    rec_dist: dict[str, int] = {}
+    for m in enriched:
+        lvl = m.get("confidence_level", "UNKNOWN")
+        rec = m.get("decision_recommendation", "UNKNOWN")
+        conf_dist[lvl] = conf_dist.get(lvl, 0) + 1
+        rec_dist[rec] = rec_dist.get(rec, 0) + 1
+
+    return {
+        "total_evaluated": total,
+        "average_confidence": avg_conf,
+        "confidence_distribution": conf_dist,
+        "recommendations_summary": rec_dist,
+        "enriched_matches": enriched,
     }
 
 
@@ -218,3 +296,47 @@ def get_reconciliation(
         record["created_at"] = created_at.isoformat()
 
     return record
+
+
+@router.get("/{reconciliation_id}/report", status_code=200)
+def download_reconciliation_report(
+    reconciliation_id: str,
+    format: str = "xlsx",
+    current_user: dict = Depends(get_current_user),
+):
+    """Download a saved reconciliation as an Excel or PDF report."""
+    if not ObjectId.is_valid(reconciliation_id):
+        raise HTTPException(status_code=400, detail="Invalid reconciliation_id.")
+
+    if format not in {"xlsx", "pdf"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported report format. Choose 'xlsx' or 'pdf'.",
+        )
+
+    query = {"_id": ObjectId(reconciliation_id)}
+    if current_user.get("role") != "ADMIN":
+        query["owner_id"] = str(current_user["_id"])
+
+    record = get_database().reconciliations.find_one(query)
+    if not record:
+        raise HTTPException(status_code=404, detail="Reconciliation record not found.")
+
+    if format == "pdf":
+        content = generate_reconciliation_pdf(record)
+        media_type = "application/pdf"
+    else:
+        content = generate_reconciliation_xlsx(record)
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="reconciliation-{reconciliation_id}.{format}"'
+            )
+        },
+    )
