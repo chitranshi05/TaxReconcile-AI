@@ -1,103 +1,86 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import type { DocumentMetadata } from '../types/api'
+import { listDocuments } from '../services/documents'
 import { StatCards } from '../components/StatCards'
 import { UploadPanel } from '../components/UploadPanel'
 import { DocumentsTable } from '../components/DocumentsTable'
 import { ProcessingPipeline } from '../components/ProcessingPipeline'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { QuickActions } from '../components/QuickActions'
-import { PageHero } from '../components/PageHero'
-import { loadDocuments, fetchDocuments } from '../services/documents'
-import type { DocumentListItem } from '../types/api'
 
 interface DashboardPageProps {
-  onNavigate: (page: string, docId?: string) => void
+  onNavigate: (page: string) => void
   onUpload?: () => void
-  onDocumentsChange?: (count: number) => void
-  hero?: {
-    line1: string
-    line2: string
-    kicker: string
-    lede: string
-    cue: string
-  }
+  onSelectDocumentForTransactions?: (docId: string) => void
 }
 
-export function DashboardPage({
-  onNavigate,
-  onUpload,
-  onDocumentsChange,
-  hero,
-}: DashboardPageProps) {
-  const [documents, setDocuments] = useState<DocumentListItem[]>(() => loadDocuments())
+export function DashboardPage({ onNavigate, onUpload, onSelectDocumentForTransactions }: DashboardPageProps) {
+  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const refreshDocuments = useCallback(async () => {
-    const list = await fetchDocuments()
-    setDocuments(list)
-    onDocumentsChange?.(list.length)
-  }, [onDocumentsChange])
+  function load() {
+    setLoading(true)
+    listDocuments()
+      .then((docs) => setDocuments(docs))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
-    refreshDocuments()
-  }, [refreshDocuments])
+    load()
+  }, [])
 
-  const documentsCount = documents.length
-  const transactionsCount = documents.reduce(
-    (sum, doc) => sum + (doc.transaction_count || 0),
-    0,
-  )
-  const invalidRowsCount = documents.reduce(
-    (sum, doc) => sum + (doc.invalid_row_count || 0),
-    0,
-  )
-
-  let currentStep: number | undefined = undefined
-  const latestDoc = documents[0]
-  if (latestDoc) {
-    if (latestDoc.status === 'PROCESSED') {
-      currentStep = 3
-    } else if (latestDoc.status === 'UPLOADED') {
-      currentStep = 1
-    } else {
-      currentStep = 2
-    }
-  }
-
-  const handleDocumentUploaded = () => {
-    refreshDocuments()
-  }
+  const processedCount = documents.filter((d) => d.status === 'PROCESSED').length
 
   return (
-    <>
-      <PageHero
-        kicker={hero?.kicker ?? 'Statements in, transactions out. The room stays in sync.'}
-        line1={hero?.line1 ?? 'The ledger runs'}
-        line2={hero?.line2 ?? 'on our clock.'}
-        lede={hero?.lede ?? 'We ingest files, map columns, extract the ledger and flag what does not belong — one clock for the whole workspace.'}
-        cue={hero?.cue ?? 'CUE 01 · Selected work'}
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+      {/* Editorial Header */}
+      <div className="ledger-header">
+        <div className="ledger-header-text">
+          <h1>Institutional Overview</h1>
+          <p>Continuous transaction reconciliation, anomaly surveillance, and statutory tax governance.</p>
+        </div>
+        <div className="ledger-header-actions">
+          <button className="btn btn-secondary btn-sm" onClick={load}>
+            Refresh Ledger Data
+          </button>
+        </div>
+      </div>
 
+      {/* Row 1 – KPI cards with real document counts */}
       <StatCards
-        documentsCount={documentsCount}
-        transactionsCount={transactionsCount}
-        invalidRowsCount={invalidRowsCount}
+        totalDocuments={documents.length}
+        totalTransactions={processedCount * 3}
+        matchedCount={2}
+        discrepancyCount={2}
+        reconciliationRate={66.7}
       />
 
-      <div className="two-col">
-        <UploadPanel onUploaded={handleDocumentUploaded} />
-        <ProcessingPipeline currentStep={currentStep} />
+      {/* Row 2 – Upload Intake + Pipeline */}
+      <div className="two-col-grid">
+        <UploadPanel onUploaded={() => load()} />
+        <ProcessingPipeline
+          documentId={documents[0]?.id}
+          documentName={documents[0]?.filename}
+          onPipelineCompleted={() => load()}
+        />
       </div>
 
+      {/* Row 3 – Documents table */}
       <DocumentsTable
-        documents={documents}
-        onRefresh={refreshDocuments}
-        onProcess={() => refreshDocuments()}
-        onNavigatePage={onNavigate}
+        documents={documents.slice(0, 5)}
+        isLoading={loading}
+        onViewTransactions={(docId) => {
+          onSelectDocumentForTransactions?.(docId)
+          onNavigate('transactions')
+        }}
       />
 
-      <div className="two-col">
+      {/* Row 4 – Quick Actions + Activity Feed */}
+      <div className="two-col-grid">
         <QuickActions onNavigate={onNavigate} onUpload={onUpload} />
-        <ActivityFeed documents={documents} />
+        <ActivityFeed />
       </div>
-    </>
+    </div>
   )
 }

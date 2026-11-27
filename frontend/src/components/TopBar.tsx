@@ -1,113 +1,80 @@
-import { BrandMark } from './BrandMark'
-import { ThemeSwitcher } from './ThemeSwitcher'
-import { Timecode } from './Timecode'
+import { RefreshCwIcon, SunIcon, MoonIcon } from './Icons'
+import type { HealthResponse } from '../types/api'
 
 interface TopBarProps {
-  title: string
-  subtitle: string
-  health: 'healthy' | 'unhealthy' | 'loading'
-  onUpload?: () => void
-  activePage: string
-  onNavigate: (page: string) => void
-  onMenu: () => void
-  menuOpen?: boolean
-}
-
-const NAV = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'transactions', label: 'Ledger' },
-  { id: 'reconciliation', label: 'Match' },
-  { id: 'anomalies', label: 'Flags' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'settings', label: 'Settings' },
-]
-
-function HealthPill({ status }: { status: TopBarProps['health'] }) {
-  const labels = {
-    healthy: 'API live',
-    unhealthy: 'API dark',
-    loading: 'Checking',
-  }
-  return (
-    <div
-      className={`health-pill ${status}`}
-      id="health-status-pill"
-      aria-label={`API status: ${status}`}
-    >
-      <span className="health-dot" />
-      {labels[status]}
-    </div>
-  )
+  pageTitle: string
+  pageSubtitle?: string
+  health: HealthResponse['status'] | 'loading'
+  onRefreshHealth?: () => void
+  onOpenAuth?: () => void
+  isAuthenticated?: boolean
+  theme?: 'light' | 'dark'
+  onToggleTheme?: () => void
 }
 
 export function TopBar({
+  pageTitle,
+  pageSubtitle,
   health,
-  onUpload,
-  activePage,
-  onNavigate,
-  onMenu,
-  menuOpen = false,
+  onRefreshHealth,
+  onOpenAuth,
+  isAuthenticated = false,
+  theme = 'light',
+  onToggleTheme,
 }: TopBarProps) {
   return (
-    <header className="header" aria-label="Page header">
-      <div className="header-row wrap">
-        <a
-          className="brand"
-          href="#main-content"
-          onClick={(e) => {
-            e.preventDefault()
-            onNavigate('dashboard')
-          }}
-          aria-label="TaxReconcile, home"
-        >
-          <BrandMark />
-          <span className="brand-word">TaxReconcile</span>
-        </a>
+    <header className="topbar">
+      <div className="topbar-context">
+        <h2 className="topbar-page-title">{pageTitle}</h2>
+        {pageSubtitle && <span className="topbar-page-sub">— {pageSubtitle}</span>}
+      </div>
 
-        <Timecode />
+      <div className="topbar-actions">
+        {onToggleTheme && (
+          <button
+            className="topbar-btn theme-toggle-btn"
+            onClick={onToggleTheme}
+            title={theme === 'light' ? 'Switch to Midnight Crème Dark' : 'Switch to Warm Crème Light'}
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? (
+              <>
+                <MoonIcon size={14} />
+                <span>Midnight</span>
+              </>
+            ) : (
+              <>
+                <SunIcon size={14} />
+                <span>Crème</span>
+              </>
+            )}
+          </button>
+        )}
 
-        <nav className="nav" aria-label="Primary">
-          <ul className="nav-list">
-            {NAV.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={`nav-link${activePage === item.id ? ' is-current' : ''}`}
-                  onClick={() => onNavigate(item.id)}
-                  aria-current={activePage === item.id ? 'page' : undefined}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        <div className="header-actions">
-          <ThemeSwitcher />
-          <HealthPill status={health} />
-          {onUpload && (
+        <div className="system-status-indicator" title="Connected to local FastAPI + MongoDB daemon">
+          <span className={`status-dot ${health === 'healthy' ? '' : 'unhealthy'}`} />
+          <span>
+            {health === 'healthy'
+              ? 'API Online · 8000'
+              : health === 'loading'
+                ? 'Connecting…'
+                : 'API Offline'}
+          </span>
+          {onRefreshHealth && (
             <button
-              id="topbar-upload-btn"
-              className="topbar-btn primary"
-              onClick={onUpload}
-              title="Upload a new document"
+              onClick={onRefreshHealth}
+              className="btn-icon"
+              title="Refresh connection"
+              style={{ marginLeft: 4, padding: 2, border: 'none' }}
             >
-              Upload
+              <RefreshCwIcon size={12} />
             </button>
           )}
-          <button
-            id="topbar-docs-btn"
-            className="menu-btn mono"
-            type="button"
-            aria-expanded={menuOpen}
-            aria-controls="site-menu"
-            onClick={onMenu}
-          >
-            Menu
-          </button>
         </div>
+
+        <button className="topbar-btn" onClick={onOpenAuth}>
+          {isAuthenticated ? 'Session Active' : 'Sign In / Register'}
+        </button>
       </div>
     </header>
   )

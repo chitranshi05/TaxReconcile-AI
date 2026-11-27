@@ -1,482 +1,416 @@
 import { useState, useEffect } from 'react'
-import { PageHero } from '../components/PageHero'
-import { loadDocuments, runReconciliation, listReconciliations } from '../services/documents'
-import type { DocumentListItem, ReconciliationResult } from '../types/api'
+import type { DocumentMetadata } from '../types/api'
+import { listDocuments } from '../services/documents'
+import {
+  runReconciliation,
+  listReconciliations,
+  downloadReconciliationReport,
+  type ReconciliationRun,
+  type ReconciliationSummary,
+} from '../services/reconciliation'
+import { DownloadIcon, ReconcileIcon } from '../components/Icons'
 
-interface ReconciliationPageProps {
-  onNavigate: (page: string) => void
-  hero?: {
-    line1: string
-    line2: string
-    kicker: string
-    lede: string
-    cue: string
-  }
-}
-
-export function ReconciliationPage({
-  onNavigate,
-  hero,
-}: ReconciliationPageProps) {
-  const [documents, setDocuments] = useState<DocumentListItem[]>([])
+export function ReconciliationPage() {
+  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
   const [bankDocId, setBankDocId] = useState<string>('')
   const [ledgerDocId, setLedgerDocId] = useState<string>('')
-  const [dateTolerance, setDateTolerance] = useState<number>(1)
-  const [amountTolerance, setAmountTolerance] = useState<number>(0.0)
   const [isRunning, setIsRunning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<ReconciliationResult | null>(null)
-  const [history, setHistory] = useState<ReconciliationResult[]>([])
+  const [activeResult, setActiveResult] = useState<any | null>(null)
+  const [historicalRuns, setHistoricalRuns] = useState<ReconciliationRun[]>([])
   const [activeTab, setActiveTab] = useState<'MATCHES' | 'BANK_ONLY' | 'LEDGER_ONLY'>('MATCHES')
+  const [downloadingFormat, setDownloadingFormat] = useState<string | null>(null)
 
-  // Load available documents and past reconciliations
-  useEffect(() => {
-    const list = loadDocuments()
-    setDocuments(list)
-    const processed = list.filter((d) => d.status === 'PROCESSED')
-    if (processed.length >= 2 && processed[0] && processed[1]) {
-      setBankDocId(processed[0].document_id)
-      setLedgerDocId(processed[1].document_id)
-    } else if (processed.length === 1 && processed[0]) {
-      setBankDocId(processed[0].document_id)
-    }
+  function loadData() {
+    listDocuments()
+      .then((docs) => {
+        const proc = docs.filter((d) => d.status === 'PROCESSED')
+        setDocuments(proc)
+        if (proc.length >= 2 && proc[0] && proc[1]) {
+          if (!bankDocId) setBankDocId(proc[0].id)
+          if (!ledgerDocId) setLedgerDocId(proc[1].id)
+        } else if (proc.length === 1 && !bankDocId && proc[0]) {
+          setBankDocId(proc[0].id)
+        }
+      })
+      .catch(() => {})
 
     listReconciliations()
       .then((res) => {
-        setHistory(res.reconciliations || [])
-        if (res.reconciliations && res.reconciliations.length > 0 && res.reconciliations[0]) {
-          setResult(res.reconciliations[0])
-        }
+        setHistoricalRuns(res.reconciliations || [])
       })
-      .catch(() => {
-        // history empty or network
-      })
+      .catch(() => {})
+  }
+
+  useEffect(() => {
+    loadData()
   }, [])
 
-  const handleRunReconciliation = async () => {
+  async function handleExecute() {
     if (!bankDocId || !ledgerDocId) {
-      setError('Please select both a Bank document and a Ledger document.')
+      alert('Please select both a Bank statement and an Accounting Ledger statement.')
       return
     }
     if (bankDocId === ledgerDocId) {
-      setError('Bank and Ledger documents must be two distinct statements.')
+      alert('Bank statement and Ledger statement must be two distinct documents.')
       return
     }
 
     setIsRunning(true)
-    setError(null)
-
     try {
-      const res = await runReconciliation({
-        bank_document_id: bankDocId,
-        ledger_document_id: ledgerDocId,
-        date_tolerance_days: dateTolerance,
-        amount_tolerance: amountTolerance,
-      })
-      setResult(res)
-      // prepend to history
-      setHistory((prev) => [res, ...prev.filter((r) => r.reconciliation_id !== res.reconciliation_id)])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reconciliation execution failed.')
+      const res = await runReconciliation(bankDocId, ledgerDocId)
+      setActiveResult(res)
+      loadData()
+    } catch (err: any) {
+      alert(err.message || 'Reconciliation failed.')
     } finally {
       setIsRunning(false)
     }
   }
 
-  const processedDocs = documents.filter((d) => d.status === 'PROCESSED')
+  async function handleDownload(recId: string, format: 'xlsx' | 'pdf') {
+    setDownloadingFormat(format)
+    try {
+      await downloadReconciliationReport(recId, format)
+    } catch (err: any) {
+      alert(err.message || 'Download failed.')
+    } finally {
+      setDownloadingFormat(null)
+    }
+  }
+
+  const summary: ReconciliationSummary | null = activeResult?.summary || null
 
   return (
-    <>
-      <PageHero
-        kicker={hero?.kicker ?? 'Match across banks, books and returns.'}
-        line1={hero?.line1 ?? 'Two sources.'}
-        line2={hero?.line2 ?? 'One clock.'}
-        lede={hero?.lede ?? 'Automatically match transactions across sources and surface discrepancies for review.'}
-        cue={hero?.cue ?? 'CUE 04 · Match'}
-      />
-
-      {/* Reconciliation Engine Configuration Card */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="section-header">
-          <div>
-            <span className="mono cue-label">ENGINE CONFIGURATION</span>
-            <h2 className="section-title">Run Reconciliation</h2>
-          </div>
-          <span className="mono t-num table-counter">
-            {processedDocs.length} PROCESSED STATEMENTS
-          </span>
-        </div>
-
-        {error && (
-          <div className="inspect-banner error mono" role="alert" style={{ marginBottom: 16 }}>
-            {error}
-          </div>
-        )}
-
-        <div className="reconciliation-setup-grid">
-          {/* Source 1: Bank */}
-          <div className="form-group">
-            <label className="mono cue-label" style={{ display: 'block', marginBottom: 8 }}>
-              SOURCE A · BANK STATEMENT
-            </label>
-            <select
-              className="table-search mono"
-              style={{ width: '100%', cursor: 'pointer' }}
-              value={bankDocId}
-              onChange={(e) => setBankDocId(e.target.value)}
-            >
-              <option value="">Select Bank Statement…</option>
-              {processedDocs.map((doc) => (
-                <option key={doc.document_id} value={doc.document_id}>
-                  {doc.filename} ({doc.transaction_count || 0} txns)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Source 2: Ledger */}
-          <div className="form-group">
-            <label className="mono cue-label" style={{ display: 'block', marginBottom: 8 }}>
-              SOURCE B · INTERNAL LEDGER / BOOKS
-            </label>
-            <select
-              className="table-search mono"
-              style={{ width: '100%', cursor: 'pointer' }}
-              value={ledgerDocId}
-              onChange={(e) => setLedgerDocId(e.target.value)}
-            >
-              <option value="">Select Company Ledger…</option>
-              {processedDocs.map((doc) => (
-                <option key={doc.document_id} value={doc.document_id}>
-                  {doc.filename} ({doc.transaction_count || 0} txns)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Tolerances */}
-          <div className="form-group">
-            <label className="mono cue-label" style={{ display: 'block', marginBottom: 8 }}>
-              DATE TOLERANCE (± DAYS)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="30"
-              className="table-search mono"
-              style={{ width: '100%' }}
-              value={dateTolerance}
-              onChange={(e) => setDateTolerance(Number(e.target.value) || 0)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="mono cue-label" style={{ display: 'block', marginBottom: 8 }}>
-              AMOUNT TOLERANCE (₹)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              className="table-search mono"
-              style={{ width: '100%' }}
-              value={amountTolerance}
-              onChange={(e) => setAmountTolerance(Number(e.target.value) || 0)}
-            />
-          </div>
-        </div>
-
-        <div style={{ marginTop: 20, display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button
-            type="button"
-            className="btn btn-primary mono"
-            disabled={isRunning || processedDocs.length < 2}
-            onClick={handleRunReconciliation}
-          >
-            {isRunning ? 'Reconciling statements…' : 'Run Deterministic Match →'}
-          </button>
-          {processedDocs.length < 2 && (
-            <span className="mono" style={{ color: 'var(--muted)', fontSize: 13 }}>
-              You need at least 2 processed statements to perform reconciliation.
-            </span>
-          )}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div className="ledger-header">
+        <div className="ledger-header-text">
+          <h1>Reconciliation Engine</h1>
+          <p>Multi-source automated cross-matching between external bank statements and internal general ledgers.</p>
         </div>
       </div>
 
-      {/* History Drawer / Past Runs */}
-      {history.length > 1 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="section-header">
-            <div>
-              <span className="mono cue-label">PRIOR RUNS</span>
-              <h2 className="section-title">Reconciliation History</h2>
-            </div>
-            <span className="mono t-num">{history.length} SAVED RUNS</span>
-          </div>
-
-          <div className="history-pill-list">
-            {history.map((h) => {
-              const isActive = result?.reconciliation_id === h.reconciliation_id
-              return (
-                <button
-                  key={h.reconciliation_id}
-                  type="button"
-                  className={`filter-pill mono${isActive ? ' is-active' : ''}`}
-                  onClick={() => setResult(h)}
-                >
-                  {h.bank_filename || 'Bank'} vs {h.ledger_filename || 'Ledger'} · {h.summary?.match_percentage ?? 0}% Match
-                </button>
-              )
-            })}
+      {/* Two-Statement Selector Panel */}
+      <div className="paper-panel">
+        <div className="panel-header">
+          <div className="panel-title-group">
+            <h2 className="panel-title">Statement Pairing</h2>
+            <span className="panel-subtitle">Select distinct bank and accounting ledger documents</span>
           </div>
         </div>
-      )}
 
-      {/* Results View */}
-      {result && result.summary && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '20px', alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">1. Primary Bank Statement Source</label>
+            <select className="form-select" value={bankDocId} onChange={(e) => setBankDocId(e.target.value)}>
+              <option value="">Select bank statement…</option>
+              {documents.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.filename} ({d.file_type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">2. Internal Accounting Books / Ledger</label>
+            <select className="form-select" value={ledgerDocId} onChange={(e) => setLedgerDocId(e.target.value)}>
+              <option value="">Select books/ledger…</option>
+              {documents.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.filename} ({d.file_type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <button
+              className="btn btn-primary"
+              onClick={handleExecute}
+              disabled={isRunning || !bankDocId || !ledgerDocId}
+              style={{ minHeight: '38px' }}
+            >
+              <ReconcileIcon size={14} className={isRunning ? 'spin' : ''} />
+              {isRunning ? 'Reconciling Ledger…' : 'Execute Reconciliation'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary KPI grid if result is present */}
+      {summary && (
         <>
-          {/* Summary Stat Cards */}
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-card-header">
-                <span className="mono cue-label">01</span>
-              </div>
-              <div className="stat-value mono t-num" style={{ color: 'var(--parsec)' }}>
-                {result.summary.match_percentage}%
-              </div>
-              <div className="stat-label">Match Percentage</div>
-              <div className="stat-sub">
-                {result.summary.matched_count} of {Math.max(result.summary.bank_total_transactions, result.summary.ledger_total_transactions)} matched
-              </div>
+          <div className="kpi-grid">
+            <div className="kpi-item">
+              <span className="kpi-label">Reconciliation Rate</span>
+              <span className="kpi-value" style={{ color: 'var(--brand-green)' }}>
+                {summary.reconciliation_rate.toFixed(1)}%
+              </span>
+              <span className="kpi-sub">{summary.matched_count} verified matching pairs</span>
             </div>
 
-            <div className="stat-card">
-              <div className="stat-card-header">
-                <span className="mono cue-label">02</span>
-              </div>
-              <div className="stat-value mono t-num">{result.summary.matched_count}</div>
-              <div className="stat-label">Matched Pairs</div>
-              <div className="stat-sub">Cleared transactions</div>
+            <div className="kpi-item">
+              <span className="kpi-label">Bank-Only Unmatched</span>
+              <span className="kpi-value" style={{ color: summary.bank_only_count > 0 ? 'var(--semantic-warning)' : 'var(--text-primary)' }}>
+                {summary.bank_only_count}
+              </span>
+              <span className="kpi-sub">Appears in bank but missing in books</span>
             </div>
 
-            <div className="stat-card">
-              <div className="stat-card-header">
-                <span className="mono cue-label">03</span>
-              </div>
-              <div className="stat-value mono t-num" style={{ color: result.summary.bank_only_count ? 'var(--accent-yellow)' : 'var(--muted)' }}>
-                {result.summary.bank_only_count}
-              </div>
-              <div className="stat-label">Bank Only (Unreconciled)</div>
-              <div className="stat-sub">Missing in company books</div>
+            <div className="kpi-item">
+              <span className="kpi-label">Ledger-Only Unmatched</span>
+              <span className="kpi-value" style={{ color: summary.ledger_only_count > 0 ? 'var(--semantic-warning)' : 'var(--text-primary)' }}>
+                {summary.ledger_only_count}
+              </span>
+              <span className="kpi-sub">Appears in books but uncleared in bank</span>
             </div>
 
-            <div className="stat-card">
-              <div className="stat-card-header">
-                <span className="mono cue-label">04</span>
-              </div>
-              <div className="stat-value mono t-num" style={{ color: result.summary.ledger_only_count ? 'var(--accent-red)' : 'var(--muted)' }}>
-                {result.summary.ledger_only_count}
-              </div>
-              <div className="stat-label">Ledger Only (Unreconciled)</div>
-              <div className="stat-sub">Uncleared deposits/payments</div>
+            <div className="kpi-item">
+              <span className="kpi-label">Net Discrepancy</span>
+              <span
+                className="kpi-value"
+                style={{
+                  color: summary.net_discrepancy !== 0 ? 'var(--semantic-error)' : 'var(--semantic-success)',
+                }}
+              >
+                ₹{Math.abs(summary.net_discrepancy).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+              <span className="kpi-sub">
+                {summary.net_discrepancy === 0 ? 'Zero variance (Balanced)' : 'Unreconciled balance differential'}
+              </span>
             </div>
           </div>
 
-          {/* Detailed Discrepancy & Matches Table */}
-          <div className="card">
-            <div className="section-header">
+          {/* Report Download Toolbar */}
+          <div className="paper-panel" style={{ padding: '16px 20px', backgroundColor: 'var(--bg-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <span className="mono cue-label">RECONCILIATION AUDIT TRAIL</span>
-                <h2 className="section-title">
-                  {activeTab === 'MATCHES'
-                    ? `Matched Pairs (${result.matches?.length || 0})`
-                    : activeTab === 'BANK_ONLY'
-                    ? `Bank Only Unreconciled (${result.bank_only?.length || 0})`
-                    : `Ledger Only Unreconciled (${result.ledger_only?.length || 0})`}
-                </h2>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>Reconciliation Run ID: {activeResult.reconciliation_id}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Matched: {activeResult.bank_filename} ↔ {activeResult.ledger_filename}
+                </div>
               </div>
 
-              <div className="table-filter-pills">
+              <div style={{ display: 'flex', gap: '10px' }}>
                 <button
-                  type="button"
-                  className={`filter-pill mono${activeTab === 'MATCHES' ? ' is-active' : ''}`}
-                  onClick={() => setActiveTab('MATCHES')}
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleDownload(activeResult.reconciliation_id, 'xlsx')}
+                  disabled={downloadingFormat === 'xlsx'}
                 >
-                  Matched ({result.matches?.length || 0})
+                  <DownloadIcon size={13} />
+                  {downloadingFormat === 'xlsx' ? 'Generating…' : 'Export Excel (.xlsx)'}
                 </button>
+
                 <button
-                  type="button"
-                  className={`filter-pill mono${activeTab === 'BANK_ONLY' ? ' is-active' : ''}`}
-                  onClick={() => setActiveTab('BANK_ONLY')}
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleDownload(activeResult.reconciliation_id, 'pdf')}
+                  disabled={downloadingFormat === 'pdf'}
                 >
-                  Bank Only ({result.bank_only?.length || 0})
-                </button>
-                <button
-                  type="button"
-                  className={`filter-pill mono${activeTab === 'LEDGER_ONLY' ? ' is-active' : ''}`}
-                  onClick={() => setActiveTab('LEDGER_ONLY')}
-                >
-                  Ledger Only ({result.ledger_only?.length || 0})
+                  <DownloadIcon size={13} />
+                  {downloadingFormat === 'pdf' ? 'Compiling…' : 'Export PDF Report (.pdf)'}
                 </button>
               </div>
             </div>
+          </div>
 
-            {/* TAB: MATCHED PAIRS */}
-            {activeTab === 'MATCHES' && (
-              <div className="table-responsive">
-                {result.matches?.length === 0 ? (
-                  <div className="placeholder-state mono">
-                    <div className="placeholder-text">No matches found between these statements.</div>
-                  </div>
-                ) : (
-                  <table className="data-table mono" aria-label="Matched pairs">
+          {/* Breakdown Tabs */}
+          <div className="paper-panel">
+            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-hairline)', paddingBottom: '12px', marginBottom: '16px' }}>
+              {(['MATCHES', 'BANK_ONLY', 'LEDGER_ONLY'] as const).map((t) => (
+                <button
+                  key={t}
+                  className={`btn btn-sm ${activeTab === t ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setActiveTab(t)}
+                >
+                  {t === 'MATCHES'
+                    ? `Matched Pairs (${summary.matched_count})`
+                    : t === 'BANK_ONLY'
+                    ? `Bank Only (${summary.bank_only_count})`
+                    : `Ledger Only (${summary.ledger_only_count})`}
+                </button>
+              ))}
+            </div>
+
+            <div className="table-container">
+              <table className="ledger-table">
+                {activeTab === 'MATCHES' ? (
+                  <>
                     <thead>
                       <tr>
-                        <th>Bank Statement Tx</th>
-                        <th>Ledger Entry</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Amount (₹)</th>
+                        <th>Bank Date</th>
+                        <th>Bank Narration</th>
+                        <th className="num-col">Bank Amount</th>
+                        <th>Ledger Date</th>
+                        <th>Ledger Particulars</th>
+                        <th className="num-col">Ledger Amount</th>
                         <th>Match Type</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Delta</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {result.matches?.map((pair, idx) => (
-                        <tr key={idx}>
-                          <td>
-                            <div className="filename-text">{pair.bank_transaction?.description || 'Bank Tx'}</div>
-                            <div className="stat-sub mono t-num">
-                              {pair.bank_transaction?.transaction_date?.slice(0, 10)}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="filename-text">{pair.ledger_transaction?.description || 'Ledger Tx'}</div>
-                            <div className="stat-sub mono t-num">
-                              {pair.ledger_transaction?.transaction_date?.slice(0, 10)}
-                            </div>
-                          </td>
-                          <td className="t-num" style={{ textAlign: 'right', fontWeight: 600 }}>
-                            ₹{(pair.bank_transaction?.amount ?? pair.bank_transaction?.debit ?? pair.bank_transaction?.credit ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td>
-                            <span className="status-tag mono is-processed">
-                              {pair.match_type || 'EXACT'}
-                            </span>
-                          </td>
-                          <td className="t-num" style={{ textAlign: 'right', color: pair.date_diff_days ? 'var(--accent-yellow)' : 'var(--muted)' }}>
-                            {pair.date_diff_days ? `±${pair.date_diff_days}d` : '0d'}
+                      {(activeResult.matches || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '24px' }}>
+                            No matched transactions found.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        activeResult.matches.map((m: any, i: number) => (
+                          <tr key={i}>
+                            <td className="mono-cell">{m.bank_transaction?.transaction_date?.slice(0, 10) || '—'}</td>
+                            <td>{m.bank_transaction?.description || '—'}</td>
+                            <td className="num-col">
+                              ₹{(m.bank_transaction?.amount ?? m.bank_transaction?.deposit ?? m.bank_transaction?.withdrawal ?? 0).toLocaleString()}
+                            </td>
+                            <td className="mono-cell">{m.ledger_transaction?.transaction_date?.slice(0, 10) || '—'}</td>
+                            <td>{m.ledger_transaction?.description || '—'}</td>
+                            <td className="num-col">
+                              ₹{(m.ledger_transaction?.amount ?? m.ledger_transaction?.debit ?? m.ledger_transaction?.credit ?? 0).toLocaleString()}
+                            </td>
+                            <td>
+                              <span className="status-badge processed">{m.match_type || 'EXACT'}</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {/* TAB: BANK ONLY */}
-            {activeTab === 'BANK_ONLY' && (
-              <div className="table-responsive">
-                {result.bank_only?.length === 0 ? (
-                  <div className="placeholder-state mono">
-                    <div className="placeholder-text">All bank transactions were reconciled cleanly.</div>
-                  </div>
-                ) : (
-                  <table className="data-table mono" aria-label="Bank only unreconciled">
+                  </>
+                ) : activeTab === 'BANK_ONLY' ? (
+                  <>
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>Description</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Debit (₹)</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Credit (₹)</th>
-                        <th>Flag</th>
+                        <th>Narration</th>
+                        <th className="num-col">Withdrawal</th>
+                        <th className="num-col">Deposit</th>
+                        <th>Reason</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {result.bank_only?.map((tx, idx) => (
-                        <tr key={idx}>
-                          <td className="t-num">{tx.transaction_date?.slice(0, 10)}</td>
-                          <td className="cell-truncate" title={tx.description || ''}>{tx.description || '—'}</td>
-                          <td className="t-num" style={{ textAlign: 'right', color: 'var(--accent-red)' }}>
-                            {tx.debit ? tx.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-                          </td>
-                          <td className="t-num" style={{ textAlign: 'right', color: 'var(--parsec)' }}>
-                            {tx.credit ? tx.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-                          </td>
-                          <td>
-                            <span className="status-tag mono is-failed">MISSING IN BOOKS</span>
+                      {(activeResult.bank_only || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: '24px' }}>
+                            Zero bank-only discrepancies.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        activeResult.bank_only.map((b: any, i: number) => (
+                          <tr key={i}>
+                            <td className="mono-cell">{b.transaction_date?.slice(0, 10) || '—'}</td>
+                            <td>{b.description || '—'}</td>
+                            <td className="debit-amount">{b.withdrawal ? `₹${b.withdrawal.toLocaleString()}` : '—'}</td>
+                            <td className="credit-amount">{b.deposit ? `₹${b.deposit.toLocaleString()}` : '—'}</td>
+                            <td>
+                              <span className="status-badge warning">Missing in Books</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {/* TAB: LEDGER ONLY */}
-            {activeTab === 'LEDGER_ONLY' && (
-              <div className="table-responsive">
-                {result.ledger_only?.length === 0 ? (
-                  <div className="placeholder-state mono">
-                    <div className="placeholder-text">All ledger transactions were cleared in bank.</div>
-                  </div>
+                  </>
                 ) : (
-                  <table className="data-table mono" aria-label="Ledger only unreconciled">
+                  <>
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>Description</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Debit (₹)</th>
-                        <th className="t-num" style={{ textAlign: 'right' }}>Credit (₹)</th>
-                        <th>Flag</th>
+                        <th>Particulars</th>
+                        <th className="num-col">Debit</th>
+                        <th className="num-col">Credit</th>
+                        <th>Reason</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {result.ledger_only?.map((tx, idx) => (
-                        <tr key={idx}>
-                          <td className="t-num">{tx.transaction_date?.slice(0, 10)}</td>
-                          <td className="cell-truncate" title={tx.description || ''}>{tx.description || '—'}</td>
-                          <td className="t-num" style={{ textAlign: 'right', color: 'var(--accent-red)' }}>
-                            {tx.debit ? tx.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-                          </td>
-                          <td className="t-num" style={{ textAlign: 'right', color: 'var(--parsec)' }}>
-                            {tx.credit ? tx.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
-                          </td>
-                          <td>
-                            <span className="status-tag mono is-pending">UNCLEARED IN BANK</span>
+                      {(activeResult.ledger_only || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: '24px' }}>
+                            Zero ledger-only discrepancies.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        activeResult.ledger_only.map((l: any, i: number) => (
+                          <tr key={i}>
+                            <td className="mono-cell">{l.transaction_date?.slice(0, 10) || '—'}</td>
+                            <td>{l.description || '—'}</td>
+                            <td className="debit-amount">{l.debit ? `₹${l.debit.toLocaleString()}` : '—'}</td>
+                            <td className="credit-amount">{l.credit ? `₹${l.credit.toLocaleString()}` : '—'}</td>
+                            <td>
+                              <span className="status-badge warning">Uncleared in Bank</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
-                  </table>
+                  </>
                 )}
-              </div>
-            )}
+              </table>
+            </div>
           </div>
         </>
       )}
 
-      {!result && (
-        <div className="card">
-          <div className="placeholder-state">
-            <span className="coming-soon-kicker mono">READY</span>
-            <div className="placeholder-text">Select your bank & ledger statements above</div>
-            <div className="placeholder-sub">
-              Our reconciliation engine pairs debits to credits with customizable date & amount tolerances.
+      {/* Historical Reconciliation Runs */}
+      {historicalRuns.length > 0 && (
+        <div className="paper-panel">
+          <div className="panel-header">
+            <div className="panel-title-group">
+              <h2 className="panel-title">Prior Reconciliation Archives</h2>
+              <span className="panel-subtitle">Archival runs recorded with download links</span>
             </div>
-            {processedDocs.length === 0 && (
-              <button
-                type="button"
-                className="action-btn action-btn-accent mono"
-                style={{ marginTop: 14 }}
-                onClick={() => onNavigate('documents')}
-              >
-                Ingest Statements Now →
-              </button>
-            )}
+          </div>
+
+          <div className="table-container">
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Execution Timestamp</th>
+                  <th>Matched Pairs</th>
+                  <th className="num-col">Match Rate</th>
+                  <th className="num-col">Net Discrepancy</th>
+                  <th style={{ textAlign: 'right' }}>Download Reports</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historicalRuns.map((run) => (
+                  <tr key={run.reconciliation_id}>
+                    <td className="mono-cell">{run.reconciliation_id.slice(-8)}…</td>
+                    <td className="mono-cell">
+                      {run.created_at ? new Date(run.created_at).toLocaleString() : '—'}
+                    </td>
+                    <td>
+                      <span className="status-badge processed">{run.summary?.matched_count || 0} pairs</span>
+                    </td>
+                    <td className="num-col">{run.summary?.reconciliation_rate?.toFixed(1) || '0.0'}%</td>
+                    <td
+                      className="num-col"
+                      style={{
+                        color: run.summary?.net_discrepancy !== 0 ? 'var(--semantic-error)' : 'inherit',
+                      }}
+                    >
+                      ₹{Math.abs(run.summary?.net_discrepancy || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '6px' }}>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleDownload(run.reconciliation_id, 'xlsx')}
+                        >
+                          XLSX
+                        </button>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleDownload(run.reconciliation_id, 'pdf')}
+                        >
+                          PDF
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

@@ -1,48 +1,36 @@
-import type { TokenResponse, UserResponse } from '../types/api'
-import { requestJson, setAuthToken, getAuthToken } from './apiClient'
+import { requestJson } from './apiClient'
 
-export async function register(
-  name: string,
-  email: string,
-  password: string,
-): Promise<UserResponse> {
-  return requestJson<UserResponse>('/api/auth/register', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name, email, password }),
-  })
+export interface AuthUser {
+  id: string
+  name: string
+  email: string
+  role: string
 }
 
-export async function login(
-  email: string,
-  password: string,
-): Promise<TokenResponse> {
-  const data = await requestJson<TokenResponse>('/api/auth/login', {
+export async function loginUser(email: string, password: string): Promise<string> {
+  const result = await requestJson<{ access_token: string; token_type: string }>('/api/auth/login', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   })
-
-  if (data?.access_token) {
-    setAuthToken(data.access_token)
-  }
-
-  return data
+  localStorage.setItem('token', result.access_token)
+  return result.access_token
 }
 
-export function logout(): void {
-  setAuthToken(null)
+export async function registerUser(name: string, email: string, password: string): Promise<AuthUser> {
+  const result = await requestJson<AuthUser>('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password }),
+  })
+  return result
 }
 
-export async function getMe(): Promise<UserResponse> {
-  return requestJson<UserResponse>('/api/auth/me')
+export async function getCurrentUser(): Promise<AuthUser> {
+  return requestJson<AuthUser>('/api/auth/me')
 }
 
-export function isAuthenticated(): boolean {
-  return Boolean(getAuthToken())
+export function logoutUser(): void {
+  localStorage.removeItem('token')
+  sessionStorage.removeItem('token')
 }
-
